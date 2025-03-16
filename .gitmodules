@@ -1,0 +1,3 @@
+[submodule "ufal_emmt"]
+	path = ufal_emmt
+	url = https://github.com/ufal/eyetracked-multi-modal-translation.git
