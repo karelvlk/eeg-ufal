@@ -53,6 +53,8 @@ def load_csv_to_raw(csv_file, sfreq=256, drop_blink=True):
     hsi_channels = ["HSI_TP9", "HSI_AF7", "HSI_AF8", "HSI_TP10"]
 
     sfreq = 256
+    
+    df.fillna(method="ffill", inplace=True)
 
     # Extract data for each group (transpose to get shape: n_channels x n_samples)
     data_eeg_band = df[eeg_band_channels].to_numpy().T
