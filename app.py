@@ -183,7 +183,7 @@ def main():
     # Use empty for more precise control of vertical space
     with main_nav_col2:
         selected_file_idx_main = st.selectbox(
-            "",  # Empty label
+            "Select File",
             range(len(file_names)),
             format_func=lambda i: file_names[i],
             index=st.session_state.current_file_idx,

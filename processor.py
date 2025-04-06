@@ -4,6 +4,11 @@ from data_preprocessing import preprocess_raw_data
 import streamlit as st
 
 
+@st.cache_data(show_spinner=False)
+def get_data(csv_file, cols, **kwargs):
+    return preprocess_raw_data(csv_file, cols, **kwargs)
+
+
 def process_and_plot_eeg_data(
     csv_file: str, cols: tuple[int, int] = (21, 25), **kwargs
 ) -> tuple[plt.Figure, plt.Figure] | plt.Figure:
@@ -11,7 +16,7 @@ def process_and_plot_eeg_data(
     Plot EEG time series data from a CSV file.
     Returns the figure for Streamlit to display.
     """
-    mne_raw = preprocess_raw_data(csv_file, cols, **kwargs)
+    mne_raw = get_data(csv_file, cols, **kwargs)
 
     # Convert MNE Raw data back to Pandas DataFrame
     data = mne_raw.get_data()  # Get the EEG data

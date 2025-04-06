@@ -98,7 +98,7 @@ def preprocess_raw_data(
     df["TimeStamp"] = (df["TimeStamp"] - df["TimeStamp"].iloc[0]).dt.total_seconds()
 
     # Forward-fill missing data
-    df.fillna(method="ffill", inplace=True)
+    df.ffill(inplace=True)
     # Ensure no NaN values remain by filling any remaining ones with 0
     df.fillna(0, inplace=True)
 
