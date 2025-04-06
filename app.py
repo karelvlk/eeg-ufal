@@ -1,8 +1,8 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 from pathlib import Path
 import re
+import processor
 
 # Set page configuration
 st.set_page_config(page_title="EEG Data Browser", layout="wide")
@@ -68,39 +68,6 @@ def get_unique_identifiers(
     ids = [id_extractor(f.name) for f in files]
     # Filter out None values and return unique IDs
     return sorted(list(set(id for id in ids if id is not None)))
-
-
-def plot_eeg_timeseries(csv_file, cols=(21, 25)):
-    """
-    Plot EEG time series data from a CSV file.
-    Returns the figure for Streamlit to display.
-    """
-    # Read the CSV
-    df = pd.read_csv(csv_file)
-
-    # Extract time series
-    time = df["TimeStamp"]
-
-    if isinstance(cols, tuple):
-        if isinstance(cols[0], int):
-            eeg_columns = df.columns[slice(*cols)]
-        else:
-            eeg_columns = list(cols)
-    else:
-        eeg_columns = [df.columns[cols]]
-
-    # Create the plot
-    fig, ax = plt.subplots(figsize=(12, 6))
-    for col in eeg_columns:
-        ax.plot(time, df[col], label=col)
-
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("EEG Signal Value")
-    ax.set_title(f"EEG Time Series - {csv_file.name}")
-    ax.legend()
-    ax.grid(True)
-
-    return fig
 
 
 def create_files_dataframe(files):
@@ -289,7 +256,7 @@ def main():
     end_idx = all_columns.index(end_col) + 1  # +1 for inclusive range
 
     # Plot the data
-    fig = plot_eeg_timeseries(current_file, (start_idx, end_idx))
+    fig = processor.process_and_plot_eeg_data(current_file, (start_idx, end_idx))
     st.pyplot(fig)
 
     # Show data preview
