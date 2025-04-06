@@ -79,3 +79,75 @@ def load_csv_to_raw(csv_file, sfreq=256, drop_blink=True):
     raw_hsi = mne.io.RawArray(data_hsi, info_hsi)
 
     return raw_eeg_band, raw_raw_eeg, raw_hsi
+
+
+def preprocess_raw_data(file, *, bandpass: None | tuple[float, float]=(1., 50.), notch_filter: None | int=50, ica: bool=False, out_file=None) -> mne.io.RawArray:
+    raw_eeg_channels = ["RAW_TP9", "RAW_AF7", "RAW_AF8", "RAW_TP10"]
+    df = pd.read_csv(file)
+    
+    # Convert TimeStamp from HH:MM:SS.sss format to seconds
+    df['TimeStamp'] = pd.to_datetime(df['TimeStamp'], format='%H:%M:%S.%f', errors='coerce')
+    df['TimeStamp'] = (df['TimeStamp'] - df['TimeStamp'].iloc[0]).dt.total_seconds()
+    
+    # Forward-fill missing data
+    df.fillna(method='ffill', inplace=True)
+    # Ensure no NaN values remain by filling any remaining ones with 0
+    df.fillna(0, inplace=True)
+
+    # Create MNE RawArray (you’ll need to reshape and adjust metadata accordingly)
+    sfreq = 256  # MUSE2 typically samples at 256Hz
+    info = mne.create_info(ch_names=raw_eeg_channels, sfreq=sfreq, ch_types='eeg')
+    raw = mne.io.RawArray(df[raw_eeg_channels].T.values, info)
+    
+    # MNE Montage expects names without the RAW_ part
+    raw.rename_channels({
+        "RAW_TP9": "TP9",
+        "RAW_AF7": "AF7",
+        "RAW_AF8": "AF8",
+        "RAW_TP10": "TP10"
+    })
+
+    # Assign electrode positions
+    montage = mne.channels.make_standard_montage('standard_1020')
+    raw.set_montage(montage)
+
+    if bandpass is not None:
+        raw.filter(l_freq=bandpass[0], h_freq=bandpass[1])
+
+    if notch_filter is not None:
+        raw.notch_filter(freqs=notch_filter)
+        
+    if ica:
+        raw = apply_ica(raw, len(raw_eeg_channels))
+        
+    if out_file is not None:
+        clean_data = raw.get_data()
+        np.savetxt(out_file, clean_data.T, delimiter=",")
+        
+    return raw
+        
+    
+
+def apply_ica(raw: mne.io.RawArray, num_components, *, method: str="fastica") -> mne.io.RawArray:
+    raw.plot()  # Manually mark and exclude if needed
+    ica = mne.preprocessing.ICA(n_components=num_components, random_state=42, method=method)
+    ica.fit(raw)
+
+    # Visualize components and manually exclude blink-related ones
+    ica.plot_components()
+    ica.plot_sources(raw)
+
+    # Apply the ICA solution
+    ica.apply(raw)
+    
+    raw.plot()
+    return raw
+
+
+if __name__ == "__main__":
+    preprocess_raw_data("./ufal_emmt/preprocessed-data/eeg/See/P43-32-S191-A-U.csv", ica=True)
+
+
+
+
+
