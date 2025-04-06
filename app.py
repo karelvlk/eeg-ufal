@@ -251,6 +251,9 @@ def main():
                 st.pyplot(fig)
             with image_col2:
                 st.pyplot(raw_fig)
+        else:
+            st.pyplot(fig)
+            st.pyplot(raw_fig)
     else:
         st.pyplot(fig)
 
