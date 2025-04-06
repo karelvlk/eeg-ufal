@@ -1,10 +1,11 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 from data_preprocessing import preprocess_raw_data
+import streamlit as st
 
 
 def process_and_plot_eeg_data(
-    csv_file: str, cols: tuple[int, int] = (21, 25), compare_raw: bool = False, **kwargs
+    csv_file: str, cols: tuple[int, int] = (21, 25), **kwargs
 ) -> tuple[plt.Figure, plt.Figure] | plt.Figure:
     """
     Plot EEG time series data from a CSV file.
@@ -32,41 +33,12 @@ def process_and_plot_eeg_data(
     ax.legend()
     ax.grid(True)
 
-    if compare_raw:
-        raw_fig = plot_raw_eeg_data(csv_file, cols)
-        return raw_fig, fig
-    else:
-        return fig
+    return fig
 
 
-def plot_raw_eeg_data(csv_file: str, cols: tuple[int, int] = (21, 25), **kwargs) -> plt.Figure:
+def plot_raw_eeg_data(csv_file: str, cols: tuple[int, int] = (21, 25)) -> plt.Figure:
     """
     Plot EEG time series data from a CSV file.
     Returns the figure for Streamlit to display.
     """
-    # Read the CSV
-    df = pd.read_csv(csv_file)
-
-    # Extract time series
-    time = df["TimeStamp"]
-
-    if isinstance(cols, tuple):
-        if isinstance(cols[0], int):
-            eeg_columns = df.columns[slice(*cols)]
-        else:
-            eeg_columns = list(cols)
-    else:
-        eeg_columns = [df.columns[cols]]
-
-    # Create the plot
-    fig, ax = plt.subplots(figsize=(12, 6))
-    for col in eeg_columns:
-        ax.plot(time, df[col], label=col)
-
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("EEG Signal Value")
-    ax.set_title(f"EEG Time Series - {csv_file.name}")
-    ax.legend()
-    ax.grid(True)
-
-    return fig
+    return process_and_plot_eeg_data(csv_file, cols, ica=False, notch_filter=None, bandpass=None)

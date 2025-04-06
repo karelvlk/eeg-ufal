@@ -1,9 +1,8 @@
 import os
 import re
-
+import pandas as pd
 import mne
 import numpy as np
-import pandas as pd
 
 
 def parse_filename(filename):
@@ -86,7 +85,7 @@ def preprocess_raw_data(
     *,
     bandpass: None | tuple[float, float] = (1.0, 50.0),
     notch_filter: None | int = 50,
-    ica: bool = False,
+    ica: bool = True,
     out_file=None,
 ) -> mne.io.RawArray:
     raw_eeg_channels = ["RAW_TP9", "RAW_AF7", "RAW_AF8", "RAW_TP10"]
@@ -108,6 +107,25 @@ def preprocess_raw_data(
     info = mne.create_info(ch_names=raw_eeg_channels, sfreq=sfreq, ch_types="eeg")
     raw = mne.io.RawArray(df[raw_eeg_channels].T.values, info)
 
+    if bandpass is not None:
+        raw.filter(l_freq=bandpass[0], h_freq=bandpass[1])
+
+    if notch_filter is not None:
+        raw.notch_filter(freqs=notch_filter)
+
+    if ica:
+        raw = apply_ica(raw, len(raw_eeg_channels))
+
+    if out_file is not None:
+        clean_data = raw.get_data()
+        np.savetxt(out_file, clean_data.T, delimiter=",")
+
+    return raw
+
+
+def apply_ica(
+    raw: mne.io.RawArray, num_components, *, method: str = "fastica", auto_exclude=True, plot=False
+) -> mne.io.RawArray:
     # MNE Montage expects names without the RAW_ part
     rename_dict = {
         "RAW_TP9": "TP9",
@@ -125,35 +143,40 @@ def preprocess_raw_data(
     # Set montage with on_missing parameter to ignore missing channels
     raw.set_montage(montage, on_missing="ignore")
 
-    if bandpass is not None:
-        raw.filter(l_freq=bandpass[0], h_freq=bandpass[1])
-
-    if notch_filter is not None:
-        raw.notch_filter(freqs=notch_filter)
-
-    if ica:
-        raw = apply_ica(raw, len(raw_eeg_channels))
-
-    if out_file is not None:
-        clean_data = raw.get_data()
-        np.savetxt(out_file, clean_data.T, delimiter=",")
-
-    return raw
-
-
-def apply_ica(raw: mne.io.RawArray, num_components, *, method: str = "fastica") -> mne.io.RawArray:
-    raw.plot()  # Manually mark and exclude if needed
     ica = mne.preprocessing.ICA(n_components=num_components, random_state=42, method=method)
     ica.fit(raw)
 
-    # Visualize components and manually exclude blink-related ones
-    ica.plot_components()
-    ica.plot_sources(raw)
+    if plot:
+        ica.plot_components()
+        ica.plot_sources(raw)
 
-    # Apply the ICA solution
+    if auto_exclude:
+        # Extract ICA source time series
+        sources = ica.get_sources(raw).get_data()
+
+        # Heuristic 1: high peak-to-peak amplitude
+        ptp_amplitudes = np.ptp(sources, axis=1)
+        ptp_threshold = np.percentile(ptp_amplitudes, 95)  # top 5% most extreme
+        bad_ptp = np.where(ptp_amplitudes > ptp_threshold)[0]
+
+        # Heuristic 2: high kurtosis
+        from scipy.stats import kurtosis
+
+        kurt = kurtosis(sources, axis=1)
+        kurt_threshold = np.percentile(kurt, 95)
+        bad_kurt = np.where(kurt > kurt_threshold)[0]
+
+        # Union of detected bad components
+        bad_components = set(bad_ptp).union(bad_kurt)
+
+        ica.exclude = list(bad_components)
+        print(f"Automatically excluding ICA components: {ica.exclude}")
+
     ica.apply(raw)
 
-    raw.plot()
+    if plot:
+        raw.plot()
+
     return raw
 
 

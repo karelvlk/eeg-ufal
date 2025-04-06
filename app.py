@@ -176,7 +176,7 @@ def main():
         st.session_state.current_file_idx = 0
 
     # File navigation AFTER the sidebar controls
-    file_names = [f"{i+1}. {f.name}" for i, f in enumerate(all_files)]
+    file_names = [f"{i + 1}. {f.name}" for i, f in enumerate(all_files)]
     nav_container = st.container()
     main_nav_col1, main_nav_col2, main_nav_col3 = nav_container.columns([1, 2, 1])
 
@@ -226,6 +226,7 @@ def main():
     compare_raw_next_to_each_other = st.sidebar.checkbox(
         "Plots next to each other", value=False, disabled=not compare_raw
     )
+    use_ica = st.sidebar.checkbox("Use ICA", value=False)
 
     # Read CSV to get column names
     df = pd.read_csv(current_file)
@@ -239,21 +240,18 @@ def main():
     end_idx = all_columns.index(end_col) + 1  # +1 for inclusive range
 
     # Plot the data
+    fig = processor.process_and_plot_eeg_data(current_file, (start_idx, end_idx), ica=use_ica)
+
     if compare_raw:
-        # Process and plot both raw and processed data
-        raw_fig, fig = processor.process_and_plot_eeg_data(current_file, (start_idx, end_idx), compare_raw=True)
+        raw_fig = processor.plot_raw_eeg_data(current_file, (start_idx, end_idx))
+
         if compare_raw_next_to_each_other:
             image_col1, image_col2 = st.columns(2)
             with image_col1:
                 st.pyplot(fig)
             with image_col2:
                 st.pyplot(raw_fig)
-        else:
-            st.pyplot(fig)
-            st.pyplot(raw_fig)
     else:
-        # Only process and plot the processed data
-        fig = processor.process_and_plot_eeg_data(current_file, (start_idx, end_idx), compare_raw=False)
         st.pyplot(fig)
 
     # Show data preview
