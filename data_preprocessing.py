@@ -87,12 +87,12 @@ def preprocess_raw_data(
     notch_filter: None | int = 50,
     ica: bool = True,
     out_file=None,
-) -> mne.io.RawArray:
+) -> mne.io.RawArray | None:
     raw_eeg_channels = ["RAW_TP9", "RAW_AF7", "RAW_AF8", "RAW_TP10"]
     df = pd.read_csv(file)
 
     if df.empty:
-        return df
+        return None
 
     raw_eeg_channels = list(df.columns[cols[0] : cols[1]])
 
