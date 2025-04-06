@@ -129,7 +129,7 @@ def preprocess_raw_data(file, *, bandpass: None | tuple[float, float]=(1., 50.),
     
 
 def apply_ica(raw: mne.io.RawArray, num_components, *, method: str="fastica") -> mne.io.RawArray:
-    raw.plot()  # Manually mark and exclude if needed
+    raw.plot()
     ica = mne.preprocessing.ICA(n_components=num_components, random_state=42, method=method)
     ica.fit(raw)
 
@@ -137,7 +137,7 @@ def apply_ica(raw: mne.io.RawArray, num_components, *, method: str="fastica") ->
     ica.plot_components()
     ica.plot_sources(raw)
 
-    # Apply the ICA solution
+    ica.exclude = [0, 2]  # or whatever you want to remove
     ica.apply(raw)
     
     raw.plot()
