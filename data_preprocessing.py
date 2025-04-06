@@ -91,6 +91,9 @@ def preprocess_raw_data(
     raw_eeg_channels = ["RAW_TP9", "RAW_AF7", "RAW_AF8", "RAW_TP10"]
     df = pd.read_csv(file)
 
+    if df.empty:
+        return df
+
     raw_eeg_channels = list(df.columns[cols[0] : cols[1]])
 
     # Convert TimeStamp from HH:MM:SS.sss format to seconds
@@ -156,14 +159,14 @@ def apply_ica(
 
         # Heuristic 1: high peak-to-peak amplitude
         ptp_amplitudes = np.ptp(sources, axis=1)
-        ptp_threshold = np.percentile(ptp_amplitudes, 95)  # top 5% most extreme
+        ptp_threshold = np.percentile(ptp_amplitudes, 90)  # top 5% most extreme
         bad_ptp = np.where(ptp_amplitudes > ptp_threshold)[0]
 
         # Heuristic 2: high kurtosis
         from scipy.stats import kurtosis
 
         kurt = kurtosis(sources, axis=1)
-        kurt_threshold = np.percentile(kurt, 95)
+        kurt_threshold = np.percentile(kurt, 90)
         bad_kurt = np.where(kurt > kurt_threshold)[0]
 
         # Union of detected bad components

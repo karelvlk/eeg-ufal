@@ -17,6 +17,8 @@ def process_and_plot_eeg_data(
     Returns the figure for Streamlit to display.
     """
     mne_raw = get_data(csv_file, cols, **kwargs)
+    if mne_raw.empty:
+        return plt.subplots(figsize=(12, 6))[0]
 
     # Convert MNE Raw data back to Pandas DataFrame
     data = mne_raw.get_data()  # Get the EEG data
