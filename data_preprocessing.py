@@ -1,8 +1,9 @@
 import os
 import re
-import pandas as pd
+
 import mne
 import numpy as np
+import pandas as pd
 
 
 def parse_filename(filename):
@@ -53,7 +54,7 @@ def load_csv_to_raw(csv_file, sfreq=256, drop_blink=True):
     hsi_channels = ["HSI_TP9", "HSI_AF7", "HSI_AF8", "HSI_TP10"]
 
     sfreq = 256
-    
+
     df.fillna(method="ffill", inplace=True)
 
     # Extract data for each group (transpose to get shape: n_channels x n_samples)
@@ -68,12 +69,8 @@ def load_csv_to_raw(csv_file, sfreq=256, drop_blink=True):
         sfreq=sfreq,
         ch_types=["eeg"] * len(eeg_band_channels),
     )
-    info_raw_eeg = mne.create_info(
-        ch_names=raw_eeg_channels, sfreq=sfreq, ch_types=["eeg"] * len(raw_eeg_channels)
-    )
-    info_hsi = mne.create_info(
-        ch_names=hsi_channels, sfreq=sfreq, ch_types=["misc"] * len(hsi_channels)
-    )
+    info_raw_eeg = mne.create_info(ch_names=raw_eeg_channels, sfreq=sfreq, ch_types=["eeg"] * len(raw_eeg_channels))
+    info_hsi = mne.create_info(ch_names=hsi_channels, sfreq=sfreq, ch_types=["misc"] * len(hsi_channels))
 
     # Create MNE Raw objects
     raw_eeg_band = mne.io.RawArray(data_eeg_band, info_eeg_band)
@@ -90,7 +87,7 @@ def preprocess_raw_data(
     bandpass: None | tuple[float, float] = (1.0, 50.0),
     notch_filter: None | int = 50,
     ica: bool = False,
-    out_file=None
+    out_file=None,
 ) -> mne.io.RawArray:
     raw_eeg_channels = ["RAW_TP9", "RAW_AF7", "RAW_AF8", "RAW_TP10"]
     df = pd.read_csv(file)
@@ -98,9 +95,7 @@ def preprocess_raw_data(
     raw_eeg_channels = list(df.columns[cols[0] : cols[1]])
 
     # Convert TimeStamp from HH:MM:SS.sss format to seconds
-    df["TimeStamp"] = pd.to_datetime(
-        df["TimeStamp"], format="%H:%M:%S.%f", errors="coerce"
-    )
+    df["TimeStamp"] = pd.to_datetime(df["TimeStamp"], format="%H:%M:%S.%f", errors="coerce")
     df["TimeStamp"] = (df["TimeStamp"] - df["TimeStamp"].iloc[0]).dt.total_seconds()
 
     # Forward-fill missing data
@@ -146,13 +141,9 @@ def preprocess_raw_data(
     return raw
 
 
-def apply_ica(
-    raw: mne.io.RawArray, num_components, *, method: str = "fastica"
-) -> mne.io.RawArray:
+def apply_ica(raw: mne.io.RawArray, num_components, *, method: str = "fastica") -> mne.io.RawArray:
     raw.plot()  # Manually mark and exclude if needed
-    ica = mne.preprocessing.ICA(
-        n_components=num_components, random_state=42, method=method
-    )
+    ica = mne.preprocessing.ICA(n_components=num_components, random_state=42, method=method)
     ica.fit(raw)
 
     # Visualize components and manually exclude blink-related ones
@@ -167,6 +158,4 @@ def apply_ica(
 
 
 if __name__ == "__main__":
-    preprocess_raw_data(
-        "./ufal_emmt/preprocessed-data/eeg/See/P43-32-S191-A-U.csv", ica=True
-    )
+    preprocess_raw_data("./ufal_emmt/preprocessed-data/eeg/See/P43-32-S191-A-U.csv", ica=True)
