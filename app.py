@@ -44,9 +44,7 @@ def get_csv_files(category, participant_filter=None, sentence_filter=None):
 
     # Apply filters if provided
     if participant_filter and participant_filter != "All":
-        files = [
-            f for f in files if extract_participant_id(f.name) == participant_filter
-        ]
+        files = [f for f in files if extract_participant_id(f.name) == participant_filter]
 
     if sentence_filter and sentence_filter != "All":
         files = [f for f in files if extract_sentence_id(f.name) == sentence_filter]
@@ -54,9 +52,7 @@ def get_csv_files(category, participant_filter=None, sentence_filter=None):
     return files
 
 
-def get_unique_identifiers(
-    category, id_extractor, participant_filter=None, sentence_filter=None
-):
+def get_unique_identifiers(category, id_extractor, participant_filter=None, sentence_filter=None):
     """
     Get unique participant or sentence IDs from files in a category.
     Can be filtered by participant or sentence ID.
@@ -131,11 +127,7 @@ def main():
     participant_ids = ["All"] + get_unique_identifiers(
         selected_category,
         extract_participant_id,
-        sentence_filter=(
-            st.session_state.sentence_filter
-            if st.session_state.sentence_filter != "All"
-            else None
-        ),
+        sentence_filter=(st.session_state.sentence_filter if st.session_state.sentence_filter != "All" else None),
     )
 
     # Get sentence IDs with participant filter
@@ -143,9 +135,7 @@ def main():
         selected_category,
         extract_sentence_id,
         participant_filter=(
-            st.session_state.participant_filter
-            if st.session_state.participant_filter != "All"
-            else None
+            st.session_state.participant_filter if st.session_state.participant_filter != "All" else None
         ),
     )
 
@@ -167,9 +157,7 @@ def main():
     # NOW we can get all files for the selected category with filters
     all_files = get_csv_files(
         selected_category,
-        participant_filter=(
-            selected_participant if selected_participant != "All" else None
-        ),
+        participant_filter=(selected_participant if selected_participant != "All" else None),
         sentence_filter=selected_sentence if selected_sentence != "All" else None,
     )
 
@@ -179,10 +167,7 @@ def main():
 
     # Reset current file index if filters change
     filter_key = f"{selected_category}_{selected_participant}_{selected_sentence}"
-    if (
-        "filter_key" not in st.session_state
-        or st.session_state.filter_key != filter_key
-    ):
+    if "filter_key" not in st.session_state or st.session_state.filter_key != filter_key:
         st.session_state.current_file_idx = 0
         st.session_state.filter_key = filter_key
 
@@ -213,17 +198,13 @@ def main():
     with main_nav_col1:
         # Create a container at the vertical middle
         if st.button("← Previous", key="prev_main", use_container_width=True):
-            st.session_state.current_file_idx = (
-                st.session_state.current_file_idx - 1
-            ) % len(all_files)
+            st.session_state.current_file_idx = (st.session_state.current_file_idx - 1) % len(all_files)
             st.rerun()
 
     with main_nav_col3:
         # Create a container at the vertical middle
         if st.button("Next →", key="next_main", use_container_width=True):
-            st.session_state.current_file_idx = (
-                st.session_state.current_file_idx + 1
-            ) % len(all_files)
+            st.session_state.current_file_idx = (st.session_state.current_file_idx + 1) % len(all_files)
             st.rerun()
 
     # Update current file selection
@@ -240,24 +221,40 @@ def main():
     # Column selection for plotting
     st.sidebar.subheader("Plot Settings")
 
+    # Add the Compare Raw toggle
+    compare_raw = st.sidebar.checkbox("Compare Raw", value=False)
+    compare_raw_next_to_each_other = st.sidebar.checkbox(
+        "Plots next to each other", value=False, disabled=not compare_raw
+    )
+
     # Read CSV to get column names
     df = pd.read_csv(current_file)
     all_columns = list(df.columns)
 
     # Allow user to select columns to plot
-    start_col = st.sidebar.selectbox(
-        "Start Column", all_columns, index=min(21, len(all_columns) - 1)
-    )
-    end_col = st.sidebar.selectbox(
-        "End Column", all_columns, index=min(24, len(all_columns) - 1)
-    )
+    start_col = st.sidebar.selectbox("Start Column", all_columns, index=min(21, len(all_columns) - 1))
+    end_col = st.sidebar.selectbox("End Column", all_columns, index=min(24, len(all_columns) - 1))
 
     start_idx = all_columns.index(start_col)
     end_idx = all_columns.index(end_col) + 1  # +1 for inclusive range
 
     # Plot the data
-    fig = processor.process_and_plot_eeg_data(current_file, (start_idx, end_idx))
-    st.pyplot(fig)
+    if compare_raw:
+        # Process and plot both raw and processed data
+        raw_fig, fig = processor.process_and_plot_eeg_data(current_file, (start_idx, end_idx), compare_raw=True)
+        if compare_raw_next_to_each_other:
+            image_col1, image_col2 = st.columns(2)
+            with image_col1:
+                st.pyplot(fig)
+            with image_col2:
+                st.pyplot(raw_fig)
+        else:
+            st.pyplot(fig)
+            st.pyplot(raw_fig)
+    else:
+        # Only process and plot the processed data
+        fig = processor.process_and_plot_eeg_data(current_file, (start_idx, end_idx), compare_raw=False)
+        st.pyplot(fig)
 
     # Show data preview
     st.subheader("Data Preview")
