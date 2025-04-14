@@ -221,12 +221,27 @@ def main():
     # Column selection for plotting
     st.sidebar.subheader("Plot Settings")
 
+    # Initialize session state for checkboxes if not present
+    if "compare_raw" not in st.session_state:
+        st.session_state.compare_raw = False
+    if "compare_raw_next_to_each_other" not in st.session_state:
+        st.session_state.compare_raw_next_to_each_other = False
+    if "use_ica" not in st.session_state:
+        st.session_state.use_ica = False
+
     # Add the Compare Raw toggle
-    compare_raw = st.sidebar.checkbox("Compare Raw", value=False)
-    compare_raw_next_to_each_other = st.sidebar.checkbox(
-        "Plots next to each other", value=False, disabled=not compare_raw
+    st.session_state.compare_raw = st.sidebar.checkbox(
+        "Compare Raw", value=st.session_state.compare_raw, key="compare_raw_cb"
     )
-    use_ica = st.sidebar.checkbox("Use ICA", value=False)
+
+    st.session_state.compare_raw_next_to_each_other = st.sidebar.checkbox(
+        "Plots next to each other",
+        value=st.session_state.compare_raw_next_to_each_other,
+        disabled=not st.session_state.compare_raw,
+        key="compare_raw_next_cb",
+    )
+
+    st.session_state.use_ica = st.sidebar.checkbox("Use ICA", value=st.session_state.use_ica, key="use_ica_cb")
 
     # Read CSV to get column names
     df = pd.read_csv(current_file)
@@ -240,12 +255,12 @@ def main():
     end_idx = all_columns.index(end_col) + 1  # +1 for inclusive range
 
     # Plot the data
-    fig = processor.process_and_plot_eeg_data(current_file, (start_idx, end_idx), ica=use_ica)
+    fig = processor.process_and_plot_eeg_data(current_file, (start_idx, end_idx), ica=st.session_state.use_ica)
 
-    if compare_raw:
+    if st.session_state.compare_raw:
         raw_fig = processor.plot_raw_eeg_data(current_file, (start_idx, end_idx))
 
-        if compare_raw_next_to_each_other:
+        if st.session_state.compare_raw_next_to_each_other:
             image_col1, image_col2 = st.columns(2)
             with image_col1:
                 st.pyplot(fig)
