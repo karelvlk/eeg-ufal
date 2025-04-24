@@ -255,7 +255,9 @@ def main():
     end_idx = all_columns.index(end_col) + 1  # +1 for inclusive range
 
     # Plot the data
-    fig = processor.process_and_plot_eeg_data(current_file, (start_idx, end_idx), ica=st.session_state.use_ica)
+    fig, wav, gaze = processor.process_and_plot_eeg_data(
+        current_file, (start_idx, end_idx), ica=st.session_state.use_ica
+    )
 
     if st.session_state.compare_raw:
         raw_fig = processor.plot_raw_eeg_data(current_file, (start_idx, end_idx))
@@ -271,6 +273,11 @@ def main():
             st.pyplot(raw_fig)
     else:
         st.pyplot(fig)
+
+    if wav:
+        st.audio(wav)
+    else:
+        st.warning("No audio file found")
 
     # Show data preview
     st.subheader("Data Preview")
