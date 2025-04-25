@@ -7,6 +7,7 @@ import librosa.display
 import numpy as np
 from data_preprocessing import preprocess_raw_data
 import streamlit as st
+import seaborn as sns
 
 
 @st.cache_data(show_spinner=False)
@@ -36,6 +37,50 @@ def get_related_files(csv_file: str) -> tuple[str | None, str | None]:
     return audio_file, gaze_file
 
 
+def plot_gaze_heatmap(df: pd.DataFrame) -> plt.Figure:
+    # Ensure X and Y are numeric
+    df["X"] = pd.to_numeric(df["X"], errors="coerce")
+    df["Y"] = pd.to_numeric(df["Y"], errors="coerce")
+    # Drop rows with invalid coordinates
+    df = df.dropna(subset=["X", "Y"])
+    # Rozdělení podle typu události
+    saccade_df = df[df["Event"] == "saccade"]
+    fixation_df = df[df["Event"] == "fixation"]
+
+    # Společný rozsah os
+    x_min = 0  # vynucený začátek na 0
+    x_max = 1280
+    y_min = 0
+    y_max = 1024
+
+    # Vytvoření grafu
+    fig, axes = plt.subplots(1, 3, figsize=(12, 18))
+
+    for ax in axes:
+        ax.set_xlim(x_min, x_max)
+        ax.set_ylim(y_max, y_min)  # Osa Y obráceně (0,0 vlevo nahoře)
+        ax.set_aspect("equal")  # Stejné měřítko
+
+    # Heatmapa Saccade
+    sns.kdeplot(x=saccade_df["X"], y=saccade_df["Y"], cmap="Reds", fill=True, ax=axes[0])
+    axes[0].set_title("Heatmap of Saccade Events")
+
+    # Heatmapa Fixation
+    sns.kdeplot(x=fixation_df["X"], y=fixation_df["Y"], cmap="Blues", fill=True, ax=axes[1])
+    axes[1].set_title("Heatmap of Fixation Events")
+
+    # Kombinovaná heatmapa
+    sns.kdeplot(x=saccade_df["X"], y=saccade_df["Y"], cmap="Reds", fill=True, alpha=0.5, ax=axes[2], label="Saccade")
+    sns.kdeplot(
+        x=fixation_df["X"], y=fixation_df["Y"], cmap="Blues", fill=True, alpha=0.5, ax=axes[2], label="Fixation"
+    )
+    axes[2].set_title("Combined Heatmap of Events")
+    axes[2].legend()
+
+    return fig
+
+
+@st.cache_data(show_spinner=True)
 def process_and_plot_eeg_data(
     csv_file: str,
     cols: tuple[int, int] = (21, 25),
@@ -43,7 +88,7 @@ def process_and_plot_eeg_data(
     plot_audio: bool = True,
     plot_gaze: bool = True,
     **kwargs,
-) -> tuple[plt.Figure, str | None, str | None]:
+) -> tuple[plt.Figure, str | None, plt.Figure | None]:
     """
     Plot EEG time series data and/or audio from a CSV file.
     Args:
@@ -65,7 +110,6 @@ def process_and_plot_eeg_data(
     # Define vertical offsets for different signals
     eeg_offset = 0
     audio_offset = -200
-    gaze_offset = 200
 
     # Define colors for different signals
     audio_color = "gray"
@@ -106,11 +150,12 @@ def process_and_plot_eeg_data(
             logging.warning(f"Failed to load audio file and process it: {e}")
 
     # Plot gaze intensity if gaze file exists
+    gaze_heatmap = None
     if plot_gaze and gaze_file:
         try:
             # --- Load gaze data ---
             gaze_df = pd.read_csv(gaze_file)
-
+            gaze_heatmap = plot_gaze_heatmap(gaze_df)
             # Parse numeric X/Y and handle blinks ("." becomes NaN)
             gaze_df["X"] = pd.to_numeric(gaze_df["X"], errors="coerce")
             gaze_df["Y"] = pd.to_numeric(gaze_df["Y"], errors="coerce")
@@ -217,10 +262,12 @@ def process_and_plot_eeg_data(
     )
     ax.grid(True)
 
-    return fig, audio_file, gaze_file
+    return fig, audio_file, gaze_heatmap
 
 
-def plot_raw_eeg_data(csv_file: str, cols: tuple[int, int] = (21, 25)) -> tuple[plt.Figure, str | None, str | None]:
+def plot_raw_eeg_data(
+    csv_file: str, cols: tuple[int, int] = (21, 25)
+) -> tuple[plt.Figure, str | None, plt.Figure | None]:
     """
     Plot EEG time series data from a CSV file.
     Returns the figure for Streamlit to display.

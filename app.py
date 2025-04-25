@@ -255,7 +255,7 @@ def main():
     end_idx = all_columns.index(end_col) + 1  # +1 for inclusive range
 
     # Plot the data
-    fig, wav, gaze = processor.process_and_plot_eeg_data(
+    fig, wav, gaze_heatmap = processor.process_and_plot_eeg_data(
         current_file, (start_idx, end_idx), ica=st.session_state.use_ica
     )
 
@@ -278,6 +278,11 @@ def main():
         st.audio(wav)
     else:
         st.warning("No audio file found")
+
+    if gaze_heatmap:
+        st.pyplot(gaze_heatmap)
+    else:
+        st.warning("No gaze file found")
 
     # Show data preview
     st.subheader("Data Preview")
