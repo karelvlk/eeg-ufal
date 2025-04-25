@@ -228,6 +228,8 @@ def main():
         st.session_state.compare_raw_next_to_each_other = False
     if "use_ica" not in st.session_state:
         st.session_state.use_ica = False
+    if "gaze_window_size" not in st.session_state:
+        st.session_state.gaze_window_size = 100  # Default 100ms
 
     # Add the Compare Raw toggle
     st.session_state.compare_raw = st.sidebar.checkbox(
@@ -243,6 +245,16 @@ def main():
 
     st.session_state.use_ica = st.sidebar.checkbox("Use ICA", value=st.session_state.use_ica, key="use_ica_cb")
 
+    # Gaze window size slider
+    st.session_state.gaze_window_size = st.sidebar.slider(
+        "Gaze sampling window (ms)",
+        min_value=10,
+        max_value=1000,
+        value=st.session_state.gaze_window_size,
+        step=10,
+        help="Size of the time window for gaze intensity sampling in milliseconds",
+    )
+
     # Read CSV to get column names
     df = pd.read_csv(current_file)
     all_columns = list(df.columns)
@@ -256,11 +268,14 @@ def main():
 
     # Plot the data
     fig, wav, gaze_heatmap = processor.process_and_plot_eeg_data(
-        current_file, (start_idx, end_idx), ica=st.session_state.use_ica
+        current_file,
+        (start_idx, end_idx),
+        ica=st.session_state.use_ica,
+        gaze_window_size=st.session_state.gaze_window_size / 1000.0,  # Convert ms to seconds
     )
 
     if st.session_state.compare_raw:
-        raw_fig = processor.plot_raw_eeg_data(current_file, (start_idx, end_idx))
+        raw_fig, _, _ = processor.plot_raw_eeg_data(current_file, (start_idx, end_idx))
 
         if st.session_state.compare_raw_next_to_each_other:
             image_col1, image_col2 = st.columns(2)

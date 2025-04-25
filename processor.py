@@ -87,6 +87,7 @@ def process_and_plot_eeg_data(
     plot_eeg: bool = True,
     plot_audio: bool = True,
     plot_gaze: bool = True,
+    gaze_window_size: float = 0.1,  # in seconds
     **kwargs,
 ) -> tuple[plt.Figure, str | None, plt.Figure | None]:
     """
@@ -94,10 +95,10 @@ def process_and_plot_eeg_data(
     Args:
         csv_file: Path to the CSV file
         cols: Tuple of column indices to use
-        method: What to plot - "eeg", "audio", or "both"
         plot_eeg: Whether to plot EEG data
         plot_audio: Whether to plot audio data
         plot_gaze: Whether to plot gaze data
+        gaze_window_size: Size of the time window for gaze intensity sampling in seconds
         **kwargs: Additional arguments passed to get_data
     Returns:
         Figure for Streamlit to display
@@ -173,7 +174,7 @@ def process_and_plot_eeg_data(
             gaze_df["Movement"] = gaze_df["deltaX"] + gaze_df["deltaY"]
 
             # Bin into time windows
-            window_size = 0.1  # seconds
+            window_size = gaze_window_size  # seconds
             max_time = gaze_df["Time"].max()
             bins = np.arange(0, max_time + window_size, window_size)
             gaze_df["bin"] = np.floor(gaze_df["Time"] / window_size).astype(int)
@@ -272,4 +273,4 @@ def plot_raw_eeg_data(
     Plot EEG time series data from a CSV file.
     Returns the figure for Streamlit to display.
     """
-    return process_and_plot_eeg_data(csv_file, cols, method="eeg", ica=False, notch_filter=None, bandpass=None)
+    return process_and_plot_eeg_data(csv_file, cols, ica=False, notch_filter=None, bandpass=None)
