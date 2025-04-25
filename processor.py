@@ -18,19 +18,21 @@ def get_related_files(csv_file: str) -> tuple[str | None, str | None]:
     raw_basename = os.path.basename(csv_file).split(".")[0]
     p, o, s, c1, c2 = raw_basename.split("-")
     # :facepalm: i don't fucking know what the fuck is happening during data preprocessing
-    basename = f"{p}-{str(int(o)-1).zfill(2)}-{s}-{c1}-{c2}"
+    basename_audio = f"{p}-{str(int(o)-1).zfill(2)}-{s}-{c1}-{c2}"
+    basename_gaze = f"{p}-{o}-{s}-{c1}-{c2}"
 
     category = os.path.basename(os.path.dirname(csv_file))
 
-    print("base", basename)
+    print("basename_audio", basename_audio)
+    print("basename_gaze", basename_gaze)
     print("category", category)
 
-    audio_file = os.path.join(os.path.dirname(csv_file), "../../", "audio", category, f"{basename}.wav")
+    audio_file = os.path.join(os.path.dirname(csv_file), "../../", "audio", category, f"{basename_audio}.wav")
     if not os.path.exists(audio_file):
         logging.warning(f"Audio file not found: {audio_file}")
         audio_file = None
 
-    gaze_file = os.path.join(os.path.dirname(csv_file), "../../", "gaze", category, f"{basename}.csv")
+    gaze_file = os.path.join(os.path.dirname(csv_file), "../../", "gaze", category, f"{basename_gaze}.csv")
     if not os.path.exists(gaze_file):
         logging.warning(f"Gaze file not found: {gaze_file}")
         gaze_file = None
@@ -41,7 +43,9 @@ def get_related_files(csv_file: str) -> tuple[str | None, str | None]:
 def process_and_plot_eeg_data(
     csv_file: str,
     cols: tuple[int, int] = (21, 25),
-    method: str = "both",  # "eeg", "audio", or "both"
+    plot_eeg: bool = True,
+    plot_audio: bool = True,
+    plot_gaze: bool = True,
     **kwargs,
 ) -> tuple[plt.Figure, str | None, str | None]:
     """
@@ -50,16 +54,28 @@ def process_and_plot_eeg_data(
         csv_file: Path to the CSV file
         cols: Tuple of column indices to use
         method: What to plot - "eeg", "audio", or "both"
+        plot_eeg: Whether to plot EEG data
+        plot_audio: Whether to plot audio data
+        plot_gaze: Whether to plot gaze data
         **kwargs: Additional arguments passed to get_data
     Returns:
         Figure for Streamlit to display
     """
     audio_file, gaze_file = get_related_files(csv_file)
 
-    # Create the plot
-    fig, ax = plt.subplots(figsize=(12, 6))
+    # Create a single plot
+    fig, ax = plt.subplots(figsize=(12, 8))
 
-    if method in ["eeg", "both"]:
+    # Define vertical offsets for different signals
+    eeg_offset = 0
+    audio_offset = -200
+    gaze_offset = 200
+
+    # Define colors for different signals
+    audio_color = "gray"
+    gaze_color = "red"
+
+    if plot_eeg:
         mne_raw = get_data(csv_file, cols, **kwargs)
         if mne_raw is not None:
             # Convert MNE Raw data back to Pandas DataFrame
@@ -73,34 +89,102 @@ def process_and_plot_eeg_data(
 
             # Plot EEG data
             for col in eeg_columns:
-                ax.plot(df["Time"], df[col], label=col)
+                ax.plot(df["Time"], df[col] + eeg_offset, label=col)
         else:
             logging.warning("No EEG data available")
 
-    if method in ["audio", "both"] and audio_file:
+    if plot_audio and audio_file:
         try:
             # Load audio file
             y, sr = librosa.load(audio_file)
             audio_time = np.linspace(0, len(y) / sr, len(y))
 
-            if method == "both" and "eeg_columns" in locals():
-                # Normalize audio to match EEG scale and shift down
+            if plot_eeg or plot_gaze:
+                # Normalize audio to match EEG scale
                 y_normalized = y * (np.max(df[eeg_columns].values) - np.min(df[eeg_columns].values)) / 2
-                y_normalized = y_normalized - 200  # Shift down to y=-200
-                ax.plot(audio_time, y_normalized, color="gray", alpha=0.3, label="Audio")
+                ax.plot(audio_time, y_normalized + audio_offset, color=audio_color, alpha=0.3, label="Audio")
             else:
-                # Plot raw audio shifted down
-                y_shifted = y - 200  # Shift down to y=-200
-                ax.plot(audio_time, y_shifted, color="gray", alpha=0.3, label="Audio")
+                # Plot raw audio
+                ax.plot(audio_time, y + audio_offset, color=audio_color, alpha=0.3, label="Audio")
         except Exception as e:
-            logging.warning(f"Failed to load audio file: {e}")
-    elif method in ["audio", "both"]:
-        logging.warning("No audio file found")
+            logging.warning(f"Failed to load audio file and process it: {e}")
+
+    # Plot gaze intensity if gaze file exists
+    if plot_gaze and gaze_file:
+        try:
+            # --- Load gaze data ---
+            gaze_df = pd.read_csv(gaze_file)
+
+            # Parse numeric X/Y and handle blinks ("." becomes NaN)
+            gaze_df["X"] = pd.to_numeric(gaze_df["X"], errors="coerce")
+            gaze_df["Y"] = pd.to_numeric(gaze_df["Y"], errors="coerce")
+
+            # Parse TimeStamp and remove rows with invalid data
+            gaze_df["TimeDT"] = pd.to_datetime(gaze_df["TimeStamp"], format="%H:%M:%S.%f", errors="coerce")
+            gaze_df = gaze_df.dropna(subset=["TimeDT", "X", "Y"])  # Skip blinks
+
+            # Compute elapsed time
+            gaze_df["Time"] = (gaze_df["TimeDT"] - gaze_df["TimeDT"].min()).dt.total_seconds()
+
+            # Compute delta movement (absolute change)
+            gaze_df["deltaX"] = gaze_df["X"].diff().abs()
+            gaze_df["deltaY"] = gaze_df["Y"].diff().abs()
+            gaze_df["Movement"] = gaze_df["deltaX"] + gaze_df["deltaY"]
+
+            # Bin into time windows
+            window_size = 0.1  # seconds
+            max_time = gaze_df["Time"].max()
+            bins = np.arange(0, max_time + window_size, window_size)
+            gaze_df["bin"] = np.floor(gaze_df["Time"] / window_size).astype(int)
+
+            # Sum movement per time window
+            movement_per_bin = gaze_df.groupby("bin")["Movement"].sum().reindex(np.arange(len(bins) - 1), fill_value=0)
+
+            # Normalize to 0–100 scale
+            scale = 100.0 / max(movement_per_bin.max(), 1)
+            movement_scaled = movement_per_bin * scale
+
+            # Offset and plot
+            ax.bar(
+                bins[:-1],
+                movement_scaled,
+                width=window_size,
+                alpha=0.6,
+                label="Gaze movement intensity (ΔX + ΔY)",
+                color=gaze_color,
+                bottom=-400,
+            )
+
+            # Format x-axis
+            def format_time(sec):
+                h = int(sec // 3600)
+                m = int((sec % 3600) // 60)
+                s = int(sec % 60)
+                return f"{h:02d}:{m:02d}:{s:02d}"
+
+            tick_interval = 0.5
+            ticks = np.arange(0, max_time + tick_interval, tick_interval)
+            ax.set_xticks(ticks)
+            ax.set_xticklabels([format_time(t) for t in ticks])
+
+        except Exception as e:
+            logging.warning(f"Failed to load gaze file and process it: {e}")
 
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Signal Value")
-    title = {"eeg": "EEG Time Series", "audio": "Audio Waveform", "both": "EEG Time Series with Audio"}[method]
+
+    # Build title based on what's being plotted
+    title_parts = []
+    if plot_eeg:
+        title_parts.append("EEG")
+    if plot_audio:
+        title_parts.append("Audio")
+    if plot_gaze:
+        title_parts.append("Gaze")
+
+    title = " + ".join(title_parts) if title_parts else "No Data Selected"
     ax.set_title(f"{title} - {csv_file}")
+
     ax.legend()
     ax.grid(True)
 
