@@ -23,10 +23,6 @@ def get_related_files(csv_file: str) -> tuple[str | None, str | None]:
 
     category = os.path.basename(os.path.dirname(csv_file))
 
-    print("basename_audio", basename_audio)
-    print("basename_gaze", basename_gaze)
-    print("category", category)
-
     audio_file = os.path.join(os.path.dirname(csv_file), "../../", "audio", category, f"{basename_audio}.wav")
     if not os.path.exists(audio_file):
         logging.warning(f"Audio file not found: {audio_file}")
@@ -150,7 +146,7 @@ def process_and_plot_eeg_data(
                 movement_scaled,
                 width=window_size,
                 alpha=0.6,
-                label="Gaze movement intensity (ΔX + ΔY)",
+                label="Gaze intensity (ΔX+ΔY)",
                 color=gaze_color,
                 bottom=-400,
             )
@@ -166,6 +162,30 @@ def process_and_plot_eeg_data(
             ticks = np.arange(0, max_time + tick_interval, tick_interval)
             ax.set_xticks(ticks)
             ax.set_xticklabels([format_time(t) for t in ticks])
+
+            # # Plot vertical lines for each Event (if present)
+            if "Event" in gaze_df.columns:
+                event_df = gaze_df.dropna(subset=["Event", "Time"])
+                unique_events = event_df["Event"].unique()
+                event_colors = plt.cm.tab10.colors  # Up to 10 distinct colors
+                color_map = {event: event_colors[i % len(event_colors)] for i, event in enumerate(unique_events)}
+
+                for event in unique_events:
+                    times = event_df.loc[event_df["Event"] == event, "Time"].values
+                    ax.vlines(
+                        x=times,
+                        ymin=-410,
+                        ymax=-405,
+                        colors=color_map[event],
+                        linestyles="-",
+                        linewidth=1,
+                        label=f"Event: {event}",
+                    )
+
+                # Deduplicate legend entries
+                handles, labels = ax.get_legend_handles_labels()
+                by_label = dict(zip(labels, handles))
+                ax.legend(by_label.values(), by_label.keys())
 
         except Exception as e:
             logging.warning(f"Failed to load gaze file and process it: {e}")
@@ -185,7 +205,16 @@ def process_and_plot_eeg_data(
     title = " + ".join(title_parts) if title_parts else "No Data Selected"
     ax.set_title(f"{title} - {csv_file}")
 
-    ax.legend()
+    ax.legend(
+        fontsize="small",  # Reduce font size
+        markerscale=0.7,  # Smaller legend markers
+        handlelength=1.0,  # Length of the legend line
+        handletextpad=0.5,  # Space between legend marker and text
+        labelspacing=0.3,  # Vertical space between labels
+        borderpad=0.3,  # Padding inside the legend box
+        borderaxespad=0.3,  # Padding between the axes and legend box
+        loc="best",  # Auto position
+    )
     ax.grid(True)
 
     return fig, audio_file, gaze_file
