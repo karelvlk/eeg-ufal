@@ -100,6 +100,31 @@ def process_and_plot_data_cached(
     )
 
 
+@st.cache_data
+def prepare_interactive_data_cached(
+    file_name,
+    eeg_df,
+    audio_io,
+    gaze_df,
+    window_size,
+    column_range,
+    ica=None,
+    bandpass=(1.0, 50.0),
+    notch_filter=True,
+):
+    return processor.prepare_interactive_data(
+        file_name,
+        eeg_df,
+        audio_io,
+        gaze_df,
+        window_size,
+        column_range,
+        ica=ica,
+        bandpass=bandpass,
+        notch_filter=notch_filter,
+    )
+
+
 # Main app function
 def main():
     st.title("EEG Data Browser")
@@ -225,7 +250,9 @@ def main():
     # Column selection for plotting
     st.sidebar.subheader("Plot Settings")
 
-    # Initialize session state for checkboxes if not present
+    # Initialize session state for checkboxes and options if not present
+    if "use_legacy_view" not in st.session_state:
+        st.session_state.use_legacy_view = False
     if "compare_raw" not in st.session_state:
         st.session_state.compare_raw = False
     if "compare_raw_next_to_each_other" not in st.session_state:
@@ -234,19 +261,34 @@ def main():
         st.session_state.use_ica = False
     if "gaze_window_size" not in st.session_state:
         st.session_state.gaze_window_size = 100  # Default 100ms
+    if "show_eeg" not in st.session_state:
+        st.session_state.show_eeg = True
+    if "show_audio" not in st.session_state:
+        st.session_state.show_audio = True
+    if "show_gaze" not in st.session_state:
+        st.session_state.show_gaze = True
+    if "show_events" not in st.session_state:
+        st.session_state.show_events = True
+    if "show_gaze_heatmap" not in st.session_state:
+        st.session_state.show_gaze_heatmap = True
 
-    # Add the Compare Raw toggle
-    st.session_state.compare_raw = st.sidebar.checkbox(
-        "Compare Raw", value=st.session_state.compare_raw, key="compare_raw_cb"
-    )
+    # View mode toggle
+    st.session_state.use_legacy_view = st.sidebar.checkbox("Use Legacy View", value=st.session_state.use_legacy_view)
 
-    st.session_state.compare_raw_next_to_each_other = st.sidebar.checkbox(
-        "Plots next to each other",
-        value=st.session_state.compare_raw_next_to_each_other,
-        disabled=not st.session_state.compare_raw,
-        key="compare_raw_next_cb",
-    )
+    # Add the Compare Raw toggle (only relevant for legacy view)
+    if st.session_state.use_legacy_view:
+        st.session_state.compare_raw = st.sidebar.checkbox(
+            "Compare Raw", value=st.session_state.compare_raw, key="compare_raw_cb"
+        )
 
+        st.session_state.compare_raw_next_to_each_other = st.sidebar.checkbox(
+            "Plots next to each other",
+            value=st.session_state.compare_raw_next_to_each_other,
+            disabled=not st.session_state.compare_raw,
+            key="compare_raw_next_cb",
+        )
+
+    # Common settings
     st.session_state.use_ica = st.sidebar.checkbox("Use ICA", value=st.session_state.use_ica, key="use_ica_cb")
 
     # Gaze window size slider
@@ -269,56 +311,113 @@ def main():
     start_idx = all_columns.index(start_col)
     end_idx = all_columns.index(end_col) + 1  # +1 for inclusive range
 
-    # Plot the data using cached function
-    fig, wav, gaze_heatmap = process_and_plot_data_cached(
-        current_data_unit["name"],
-        eeg_df,
-        audio_io,
-        gaze_df,
-        st.session_state.gaze_window_size / 1000.0,  # Convert ms to seconds
-        (start_idx, end_idx),
-        ica=st.session_state.use_ica,
-    )
+    # Interactive view show/hide options
+    if not st.session_state.use_legacy_view:
+        st.sidebar.subheader("Show/Hide Components")
+        col1, col2 = st.sidebar.columns(2)
 
-    if st.session_state.compare_raw:
-        raw_fig, _, _ = process_and_plot_data_cached(
+        with col1:
+            st.session_state.show_eeg = st.checkbox("EEG", value=st.session_state.show_eeg)
+            st.session_state.show_audio = st.checkbox("Audio", value=st.session_state.show_audio)
+
+        with col2:
+            st.session_state.show_gaze = st.checkbox("Gaze", value=st.session_state.show_gaze)
+            st.session_state.show_events = st.checkbox("Events", value=st.session_state.show_events)
+            st.session_state.show_gaze_heatmap = st.checkbox("Gaze Heatmap", value=st.session_state.show_gaze_heatmap)
+
+    # Process data based on view mode
+    if st.session_state.use_legacy_view:
+        # Legacy view - using matplotlib plots
+        fig, wav, gaze_heatmap = process_and_plot_data_cached(
             current_data_unit["name"],
             eeg_df,
             audio_io,
             gaze_df,
-            st.session_state.gaze_window_size / 1000.0,
+            st.session_state.gaze_window_size / 1000.0,  # Convert ms to seconds
             (start_idx, end_idx),
-            ica=None,
-            bandpass=None,
-            notch_filter=None,
-            out_file=None,
+            ica=st.session_state.use_ica,
         )
 
-        if st.session_state.compare_raw_next_to_each_other:
-            image_col1, image_col2 = st.columns(2)
-            with image_col1:
+        if st.session_state.compare_raw:
+            raw_fig, _, _ = process_and_plot_data_cached(
+                current_data_unit["name"],
+                eeg_df,
+                audio_io,
+                gaze_df,
+                st.session_state.gaze_window_size / 1000.0,
+                (start_idx, end_idx),
+                ica=None,
+                bandpass=None,
+                notch_filter=None,
+                out_file=None,
+            )
+
+            if st.session_state.compare_raw_next_to_each_other:
+                image_col1, image_col2 = st.columns(2)
+                with image_col1:
+                    st.pyplot(fig)
+                with image_col2:
+                    st.pyplot(raw_fig)
+            else:
                 st.pyplot(fig)
-            with image_col2:
                 st.pyplot(raw_fig)
         else:
             st.pyplot(fig)
-            st.pyplot(raw_fig)
-    else:
-        st.pyplot(fig)
 
-    if wav is not None:
-        st.audio(wav)
-    else:
-        st.warning("No audio file found")
+        if wav is not None:
+            st.audio(wav)
+        else:
+            st.warning("No audio file found")
 
-    if gaze_heatmap is not None:
-        st.pyplot(gaze_heatmap)
+        if gaze_heatmap is not None:
+            st.pyplot(gaze_heatmap)
+        else:
+            st.warning("No gaze heatmap data found")
     else:
-        st.warning("No gaze file found")
+        # Interactive view - using Altair for interactive charts
+        processed_data = prepare_interactive_data_cached(
+            current_data_unit["name"],
+            eeg_df,
+            audio_io,
+            gaze_df,
+            st.session_state.gaze_window_size / 1000.0,  # Convert ms to seconds
+            (start_idx, end_idx),
+            ica=st.session_state.use_ica,
+        )
+
+        # Show EEG data if available and user wants to see it
+        if st.session_state.show_eeg and processed_data["eeg_data"] is not None:
+            eeg_chart = processor.plot_interactive_eeg(processed_data["eeg_data"], processed_data["eeg_channels"])
+            st.altair_chart(eeg_chart, use_container_width=True)
+
+        # Show audio if available and user wants to see it
+        if st.session_state.show_audio and processed_data["audio_data"] is not None:
+            audio_chart = processor.plot_interactive_audio(processed_data["audio_data"])
+            st.altair_chart(audio_chart, use_container_width=True)
+
+        # Show gaze movement if available and user wants to see it
+        if st.session_state.show_gaze and processed_data["gaze_movement_data"] is not None:
+            gaze_chart = processor.plot_interactive_gaze_movement(processed_data["gaze_movement_data"])
+            st.altair_chart(gaze_chart, use_container_width=True)
+
+        # Show events if available and user wants to see them
+        if st.session_state.show_events and processed_data.get("event_data") is not None:
+            events_chart = processor.plot_interactive_events(processed_data["event_data"])
+            if events_chart:
+                st.altair_chart(events_chart, use_container_width=True)
+
+        # Also provide playback control
+        if audio_io is not None:
+            st.audio(audio_io)
+
+        # Show gaze heatmap if available and user wants to see it
+        if st.session_state.show_gaze_heatmap and gaze_df is not None and len(gaze_df) > 0:
+            gaze_heatmap = processor.plot_gaze_heatmap(gaze_df)
+            st.pyplot(gaze_heatmap)
 
     # Show data preview
-    st.subheader("EEG Data Preview")
-    st.dataframe(eeg_df.head())
+    with st.expander("EEG Data Preview", expanded=False):
+        st.dataframe(eeg_df.head())
 
     # Create dataframe with all filtered files - using cached function
     files_df = create_files_dataframe(all_files)

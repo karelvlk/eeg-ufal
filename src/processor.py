@@ -8,7 +8,9 @@ import librosa.display
 import numpy as np
 import streamlit as st
 import seaborn as sns
+import altair as alt
 from src.data_preprocessing import preprocess_raw_data
+from typing import Dict, List, Optional, Union, Any
 
 
 def plot_gaze_heatmap(df: pd.DataFrame) -> plt.Figure:
@@ -53,6 +55,117 @@ def plot_gaze_heatmap(df: pd.DataFrame) -> plt.Figure:
     return fig
 
 
+def prepare_interactive_data(
+    name: str,
+    eeg_df: pd.DataFrame | None,
+    audio_io: io.BytesIO | None,
+    gaze_df: pd.DataFrame | None,
+    gaze_window_size: float = 0.1,  # in seconds
+    cols: tuple[int, int] = (21, 25),
+    **kwargs,
+) -> Dict[str, Any]:
+    """
+    Prepare data for interactive visualization in Streamlit.
+
+    Returns a dictionary with all processed data for plotting.
+    """
+    result: Dict[str, Any] = {
+        "eeg_data": None,
+        "audio_data": None,
+        "gaze_data": None,
+        "event_data": None,
+        "gaze_movement_data": None,
+        "name": name,
+        "eeg_channels": [],
+    }
+
+    # Process EEG data
+    if eeg_df is not None and len(eeg_df) > 1:
+        mne_raw = preprocess_raw_data(eeg_df, cols, **kwargs)
+        if mne_raw is not None:
+            # Convert MNE Raw data back to Pandas DataFrame
+            data = mne_raw.get_data()  # Get the EEG data
+            time = mne_raw.times  # Get the time vector
+            eeg_columns = mne_raw.ch_names  # Get the channel names
+
+            # Create a DataFrame with long format for Altair
+            eeg_long_df = pd.DataFrame()
+            for i, channel in enumerate(eeg_columns):
+                channel_df = pd.DataFrame({"Time": time, "Value": data[i], "Channel": channel})
+                eeg_long_df = pd.concat([eeg_long_df, channel_df])
+
+            result["eeg_data"] = eeg_long_df
+            result["eeg_channels"] = eeg_columns
+
+    # Process audio data
+    if audio_io is not None:
+        try:
+            # Reset the file pointer to the beginning
+            audio_io.seek(0)
+
+            # Load audio file
+            y, sr = librosa.load(audio_io)
+            audio_time = np.linspace(0, len(y) / sr, len(y))
+
+            # Create DataFrame for audio data
+            audio_df = pd.DataFrame({"Time": audio_time, "Value": y})
+
+            result["audio_data"] = audio_df
+            result["sample_rate"] = sr
+        except Exception as e:
+            logging.warning(f"Failed to load audio file and process it: {e}")
+
+    # Process gaze data
+    if gaze_df is not None and len(gaze_df) > 1:
+        try:
+            # Parse numeric X/Y and handle blinks ("." becomes NaN)
+            gaze_df["X"] = pd.to_numeric(gaze_df["X"], errors="coerce")
+            gaze_df["Y"] = pd.to_numeric(gaze_df["Y"], errors="coerce")
+
+            # Parse TimeStamp and remove rows with invalid data
+            gaze_df["TimeDT"] = pd.to_datetime(gaze_df["TimeStamp"], format="%H:%M:%S.%f", errors="coerce")
+            gaze_df = gaze_df.dropna(subset=["TimeDT", "X", "Y"])  # Skip blinks
+
+            # Create an explicit copy to avoid the SettingWithCopyWarning
+            gaze_df = gaze_df.copy()
+
+            # Compute elapsed time
+            gaze_df.loc[:, "Time"] = (gaze_df["TimeDT"] - gaze_df["TimeDT"].min()).dt.total_seconds()
+
+            # Store gaze positions data
+            result["gaze_data"] = gaze_df[["Time", "X", "Y"]].copy()
+
+            # Compute delta movement (absolute change)
+            gaze_df.loc[:, "deltaX"] = gaze_df["X"].diff().abs()
+            gaze_df.loc[:, "deltaY"] = gaze_df["Y"].diff().abs()
+            gaze_df.loc[:, "Movement"] = gaze_df["deltaX"] + gaze_df["deltaY"]
+
+            # Bin into time windows
+            window_size = gaze_window_size  # seconds
+            max_time = gaze_df["Time"].max()
+            bins = np.arange(0, max_time + window_size, window_size)
+            gaze_df.loc[:, "bin"] = np.floor(gaze_df["Time"] / window_size).astype(int)
+
+            # Sum movement per time window
+            movement_per_bin = gaze_df.groupby("bin")["Movement"].sum().reindex(np.arange(len(bins) - 1), fill_value=0)
+
+            # Prepare gaze movement data
+            gaze_movement_df = pd.DataFrame({"Time": bins[:-1], "Movement": movement_per_bin.values})
+
+            result["gaze_movement_data"] = gaze_movement_df
+
+            # Process events if present
+            if "Event" in gaze_df.columns:
+                event_df = gaze_df.dropna(subset=["Event", "Time"])
+                if not event_df.empty:
+                    result["event_data"] = event_df[["Time", "Event"]].copy()
+
+        except Exception as e:
+            logging.warning(f"Failed to load gaze file and process it: {e}")
+
+    return result
+
+
 @st.cache_data(show_spinner=True)
 def process_and_plot_data(
     name: str,
@@ -64,17 +177,8 @@ def process_and_plot_data(
     **kwargs,
 ) -> tuple[plt.Figure, io.BytesIO | None, plt.Figure | None]:
     """
-    Plot EEG time series data and/or audio from a CSV file.
-    Args:
-        csv_file: Path to the CSV file
-        cols: Tuple of column indices to use
-        plot_eeg: Whether to plot EEG data
-        plot_audio: Whether to plot audio data
-        plot_gaze: Whether to plot gaze data
-        gaze_window_size: Size of the time window for gaze intensity sampling in seconds
-        **kwargs: Additional arguments passed to get_data
-    Returns:
-        Figure for Streamlit to display
+    Legacy function for backward compatibility.
+    Plots EEG time series data and/or audio from a CSV file.
     """
 
     # Create a single plot
@@ -241,3 +345,81 @@ def process_and_plot_data(
     ax.grid(True)
 
     return fig, audio_io, gaze_heatmap
+
+
+def plot_interactive_eeg(data: pd.DataFrame, channels: list) -> alt.Chart:
+    """Create an interactive EEG chart with Altair"""
+    selection = alt.selection_point(fields=["Channel"], bind="legend")
+
+    base = alt.Chart(data).encode(
+        x=alt.X("Time:Q", title="Time (s)"),
+        y=alt.Y("Value:Q", title="Signal Amplitude"),
+        color=alt.Color("Channel:N", scale=alt.Scale(scheme="category10")),
+    )
+
+    lines = (
+        base.mark_line().encode(opacity=alt.condition(selection, alt.value(1), alt.value(0.2))).add_params(selection)
+    )
+
+    return lines.properties(width=700, height=400, title="EEG Signals").interactive()
+
+
+def plot_interactive_audio(data: pd.DataFrame) -> alt.Chart:
+    """Create an interactive audio waveform chart with Altair"""
+    chart = (
+        alt.Chart(data)
+        .mark_line(color="mediumslateblue", opacity=0.6)
+        .encode(x=alt.X("Time:Q", title="Time (s)"), y=alt.Y("Value:Q", title="Amplitude"))
+        .properties(width=700, height=200, title="Audio Waveform")
+        .interactive()
+    )
+
+    return chart
+
+
+def plot_interactive_gaze_movement(data: pd.DataFrame) -> alt.Chart:
+    """Create an interactive gaze movement chart with Altair"""
+    chart = (
+        alt.Chart(data)
+        .mark_bar(color="red", opacity=0.6)
+        .encode(x=alt.X("Time:Q", title="Time (s)"), y=alt.Y("Movement:Q", title="Gaze MI"))
+        .properties(width=700, height=200, title="Gaze Movement Intensity")
+        .interactive()
+    )
+
+    return chart
+
+
+def plot_interactive_events(data: pd.DataFrame | None) -> Optional[alt.Chart]:
+    """Create an interactive events chart with Altair showing events as a single timeline"""
+    if data is None or data.empty:
+        return None
+
+    # Add a constant column for the y-axis
+    data = data.copy()
+    data["y"] = 0
+
+    # Create a point chart for events on a single line
+    chart = (
+        alt.Chart(data)
+        .mark_circle(size=80)
+        .encode(
+            x=alt.X("Time:Q", title="Time (s)"),
+            y=alt.Y("y:Q", title=None, axis=None),  # Fixed position on a single line
+            color=alt.Color("Event:N", scale=alt.Scale(scheme="category10")),
+            tooltip=["Time:Q", "Event:N"],
+            opacity=alt.value(0.8),
+            size=alt.Size("Event:N", legend=None, scale=alt.Scale(range=[50, 200])),
+        )
+    )
+
+    # Add a rule to represent the timeline
+    timeline = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(color="gray").encode(y="y:Q")
+
+    # Add text labels for events
+    event_labels = chart.mark_text(align="center", baseline="bottom", dy=-10, fontSize=10).encode(text="Event:N")
+
+    # Combine the visualizations
+    combined = (timeline + chart + event_labels).properties(width=700, height=100, title="Event Timeline").interactive()
+
+    return combined
