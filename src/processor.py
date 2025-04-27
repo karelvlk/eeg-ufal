@@ -121,6 +121,9 @@ def prepare_interactive_data(
     # Process gaze data
     if gaze_df is not None and len(gaze_df) > 1:
         try:
+            print("Input gaze data columns:", gaze_df.columns.tolist())
+            print("Input gaze data sample:", gaze_df.head())
+
             # Parse numeric X/Y and handle blinks ("." becomes NaN)
             gaze_df["X"] = pd.to_numeric(gaze_df["X"], errors="coerce")
             gaze_df["Y"] = pd.to_numeric(gaze_df["Y"], errors="coerce")
@@ -135,13 +138,15 @@ def prepare_interactive_data(
             # Compute elapsed time
             gaze_df.loc[:, "Time"] = (gaze_df["TimeDT"] - gaze_df["TimeDT"].min()).dt.total_seconds()
 
-            # Store gaze positions data
-            result["gaze_data"] = gaze_df[["Time", "X", "Y"]].copy()
-
             # Compute delta movement (absolute change)
             gaze_df.loc[:, "deltaX"] = gaze_df["X"].diff().abs()
             gaze_df.loc[:, "deltaY"] = gaze_df["Y"].diff().abs()
             gaze_df.loc[:, "Movement"] = gaze_df["deltaX"] + gaze_df["deltaY"]
+
+            # Ensure all values are positive
+            gaze_df.loc[:, "deltaX"] = gaze_df["deltaX"].abs()
+            gaze_df.loc[:, "deltaY"] = gaze_df["deltaY"].abs()
+            gaze_df.loc[:, "Movement"] = gaze_df["Movement"].abs()
 
             # Bin into time windows
             window_size = gaze_window_size  # seconds
@@ -151,9 +156,29 @@ def prepare_interactive_data(
 
             # Sum movement per time window
             movement_per_bin = gaze_df.groupby("bin")["Movement"].sum().reindex(np.arange(len(bins) - 1), fill_value=0)
+            deltaX_per_bin = gaze_df.groupby("bin")["deltaX"].sum().reindex(np.arange(len(bins) - 1), fill_value=0)
+            deltaY_per_bin = gaze_df.groupby("bin")["deltaY"].sum().reindex(np.arange(len(bins) - 1), fill_value=0)
+
+            # Scale the summed values to 0-100 range
+            max_movement = movement_per_bin.max()
+            if max_movement > 0:
+                movement_per_bin = (movement_per_bin / max_movement) * 100
+                deltaX_per_bin = (deltaX_per_bin / deltaX_per_bin.max()) * 100
+                deltaY_per_bin = (deltaY_per_bin / deltaY_per_bin.max()) * 100
 
             # Prepare gaze movement data
-            gaze_movement_df = pd.DataFrame({"Time": bins[:-1], "Movement": movement_per_bin.values})
+            gaze_movement_df = pd.DataFrame(
+                {
+                    "Time": bins[:-1],
+                    "Movement": movement_per_bin.values,
+                    "deltaX": deltaX_per_bin.values,
+                    "deltaY": deltaY_per_bin.values,
+                }
+            )
+
+            print("Final gaze movement data columns:", gaze_movement_df.columns.tolist())
+            print("Final gaze movement data sample:", gaze_movement_df.head())
+            print("Final gaze movement data shape:", gaze_movement_df.shape)
 
             result["gaze_movement_data"] = gaze_movement_df
             result["max_time"] = max(result["max_time"], max_time)
@@ -167,6 +192,7 @@ def prepare_interactive_data(
 
         except Exception as e:
             logging.warning(f"Failed to load gaze file and process it: {e}")
+            print(f"Error details: {str(e)}")
 
     return result
 
@@ -257,6 +283,11 @@ def process_and_plot_data(
             gaze_df.loc[:, "deltaY"] = gaze_df["Y"].diff().abs()
             gaze_df.loc[:, "Movement"] = gaze_df["deltaX"] + gaze_df["deltaY"]
 
+            # Ensure all values are positive
+            gaze_df.loc[:, "deltaX"] = gaze_df["deltaX"].abs()
+            gaze_df.loc[:, "deltaY"] = gaze_df["deltaY"].abs()
+            gaze_df.loc[:, "Movement"] = gaze_df["Movement"].abs()
+
             # Bin into time windows
             window_size = gaze_window_size  # seconds
             max_time = gaze_df["Time"].max()
@@ -265,35 +296,34 @@ def process_and_plot_data(
 
             # Sum movement per time window
             movement_per_bin = gaze_df.groupby("bin")["Movement"].sum().reindex(np.arange(len(bins) - 1), fill_value=0)
+            deltaX_per_bin = gaze_df.groupby("bin")["deltaX"].sum().reindex(np.arange(len(bins) - 1), fill_value=0)
+            deltaY_per_bin = gaze_df.groupby("bin")["deltaY"].sum().reindex(np.arange(len(bins) - 1), fill_value=0)
 
-            # Normalize to 0–100 scale
-            scale = 100.0 / max(movement_per_bin.max(), 1)
-            movement_scaled = movement_per_bin * scale
+            # Scale the summed values to 0-100 range
+            max_movement = movement_per_bin.max()
+            if max_movement > 0:
+                movement_per_bin = (movement_per_bin / max_movement) * 100
+                deltaX_per_bin = (deltaX_per_bin / deltaX_per_bin.max()) * 100
+                deltaY_per_bin = (deltaY_per_bin / deltaY_per_bin.max()) * 100
 
-            # Offset and plot
-            ax.bar(
-                bins[:-1],
-                movement_scaled,
-                width=window_size,
-                alpha=0.6,
-                label="Gaze intensity (ΔX+ΔY)",
-                color=gaze_color,
-                bottom=-400,
+            # Prepare gaze movement data
+            gaze_movement_df = pd.DataFrame(
+                {
+                    "Time": bins[:-1],
+                    "Movement": movement_per_bin.values,
+                    "deltaX": deltaX_per_bin.values,
+                    "deltaY": deltaY_per_bin.values,
+                }
             )
 
-            # Format x-axis
-            def format_time(sec):
-                h = int(sec // 3600)
-                m = int((sec % 3600) // 60)
-                s = int(sec % 60)
-                return f"{h:02d}:{m:02d}:{s:02d}"
+            print("Final gaze movement data columns:", gaze_movement_df.columns.tolist())
+            print("Final gaze movement data sample:", gaze_movement_df.head())
+            print("Final gaze movement data shape:", gaze_movement_df.shape)
 
-            tick_interval = 0.5
-            ticks = np.arange(0, max_time + tick_interval, tick_interval)
-            ax.set_xticks(ticks)
-            ax.set_xticklabels([format_time(t) for t in ticks])
+            result["gaze_movement_data"] = gaze_movement_df
+            result["max_time"] = max(result["max_time"], max_time)
 
-            # # Plot vertical lines for each Event (if present)
+            # Process events if present
             if "Event" in gaze_df.columns:
                 event_df = gaze_df.dropna(subset=["Event", "Time"])
                 unique_events = event_df["Event"].unique()
@@ -399,11 +429,24 @@ def plot_interactive_eeg(
     )
 
 
-def plot_interactive_audio(data: pd.DataFrame, x_min: float = 0.0, x_max: float | None = None) -> alt.Chart:
-    """Create an interactive audio waveform chart with Altair"""
+def plot_interactive_audio(
+    data: pd.DataFrame, x_min: float = 0.0, x_max: float | None = None, downsample_factor: int = 20
+) -> alt.Chart:
+    """Create an interactive audio waveform chart with Altair
+
+    Args:
+        data: DataFrame containing Time and Value columns
+        x_min: Minimum time value to display
+        x_max: Maximum time value to display
+        downsample_factor: Factor by which to reduce the number of data points (default: 10)
+    """
     # Use provided x-axis range or calculate from data
     if x_max is None:
         x_max = data["Time"].max()
+
+    # Downsample the data
+    if downsample_factor > 1:
+        data = data.iloc[::downsample_factor]
 
     # Create a scale indicator
     scale_text = (
@@ -426,17 +469,14 @@ def plot_interactive_audio(data: pd.DataFrame, x_min: float = 0.0, x_max: float 
 
 def plot_interactive_gaze_movement(data: pd.DataFrame, x_min: float = 0.0, x_max: float | None = None) -> alt.Chart:
     """Create an interactive gaze movement chart with Altair"""
+    # Print data info for debugging
+    print("Plot function - Data columns:", data.columns.tolist())
+    print("Plot function - Data sample:", data.head())
+    print("Plot function - Data shape:", data.shape)
+
     # Use provided x-axis range or calculate from data
     if x_max is None:
         x_max = data["Time"].max()
-
-    # all times should be shifted by delta
-    delta = data["Time"].diff().mean()
-    print(">>>", delta)
-    data["Time"] = data["Time"] + delta * 0.5
-
-    time_delta_between_two_records = data["Time"].diff().mean()
-    bar_width = time_delta_between_two_records * 100 * 2
 
     # Create a scale indicator
     scale_text = (
@@ -445,17 +485,23 @@ def plot_interactive_gaze_movement(data: pd.DataFrame, x_min: float = 0.0, x_max
         .encode(x="x:Q", y="y:Q", text="text:N")
     )
 
-    # Create the chart with bars
-    chart = (
-        alt.Chart(data)
-        .mark_bar(color="red", opacity=0.6, width=bar_width)
-        .encode(
-            x=alt.X("Time:Q", title="Time (s)", scale=alt.Scale(domain=[x_min, x_max], padding=0)),
-            y=alt.Y("Movement:Q", title="Gaze MI"),
-        )
+    # Create base chart with proper encoding
+    base = alt.Chart(data).encode(x=alt.X("Time:Q", title="Time (s)", scale=alt.Scale(domain=[x_min, x_max])))
+
+    # Create X movement area
+    x_area = base.mark_area(color="red", opacity=0.5).encode(
+        y=alt.Y("deltaX:Q", scale=alt.Scale(zero=False)), tooltip=["Time:Q", "deltaX:Q"]
     )
 
-    return (chart + scale_text).properties(width=700, height=200, title="Gaze Movement Intensity")
+    # Create Y movement area
+    y_area = base.mark_area(color="blue", opacity=0.5).encode(
+        y=alt.Y("deltaY:Q", scale=alt.Scale(zero=False)), tooltip=["Time:Q", "deltaY:Q"]
+    )
+
+    # Combine the charts with proper layering
+    chart = (x_area + y_area + scale_text).properties(title="Gaze Movement Intensity", height=200)
+
+    return chart
 
 
 def plot_interactive_events(
