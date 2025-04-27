@@ -1,4 +1,5 @@
 import os
+import io
 import logging
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -8,33 +9,6 @@ import numpy as np
 import streamlit as st
 import seaborn as sns
 from src.data_preprocessing import preprocess_raw_data
-
-
-@st.cache_data(show_spinner=False)
-def get_data(csv_file, cols, **kwargs):
-    return preprocess_raw_data(csv_file, cols, **kwargs)
-
-
-def get_related_files(csv_file: str) -> tuple[str | None, str | None]:
-    raw_basename = os.path.basename(csv_file).split(".")[0]
-    p, o, s, c1, c2 = raw_basename.split("-")
-    # :facepalm: i don't fucking know what the fuck is happening during data preprocessing
-    basename_audio = f"{p}-{str(int(o)-1).zfill(2)}-{s}-{c1}-{c2}"
-    basename_gaze = f"{p}-{o}-{s}-{c1}-{c2}"
-
-    category = os.path.basename(os.path.dirname(csv_file))
-
-    audio_file = os.path.join(os.path.dirname(csv_file), "../../", "audio", category, f"{basename_audio}.wav")
-    if not os.path.exists(audio_file):
-        logging.warning(f"Audio file not found: {audio_file}")
-        audio_file = None
-
-    gaze_file = os.path.join(os.path.dirname(csv_file), "../../", "gaze", category, f"{basename_gaze}.csv")
-    if not os.path.exists(gaze_file):
-        logging.warning(f"Gaze file not found: {gaze_file}")
-        gaze_file = None
-
-    return audio_file, gaze_file
 
 
 def plot_gaze_heatmap(df: pd.DataFrame) -> plt.Figure:
@@ -81,15 +55,15 @@ def plot_gaze_heatmap(df: pd.DataFrame) -> plt.Figure:
 
 
 @st.cache_data(show_spinner=True)
-def process_and_plot_eeg_data(
-    csv_file: str,
-    cols: tuple[int, int] = (21, 25),
-    plot_eeg: bool = True,
-    plot_audio: bool = True,
-    plot_gaze: bool = True,
+def process_and_plot_data(
+    name: str,
+    eeg_df: pd.DataFrame | None,
+    audio_io: io.BytesIO | None,
+    gaze_df: pd.DataFrame | None,
     gaze_window_size: float = 0.1,  # in seconds
+    cols: tuple[int, int] = (21, 25),
     **kwargs,
-) -> tuple[plt.Figure, str | None, plt.Figure | None]:
+) -> tuple[plt.Figure, io.BytesIO | None, plt.Figure | None]:
     """
     Plot EEG time series data and/or audio from a CSV file.
     Args:
@@ -103,7 +77,6 @@ def process_and_plot_eeg_data(
     Returns:
         Figure for Streamlit to display
     """
-    audio_file, gaze_file = get_related_files(csv_file)
 
     # Create a single plot
     fig, ax = plt.subplots(figsize=(12, 8))
@@ -116,8 +89,8 @@ def process_and_plot_eeg_data(
     audio_color = "gray"
     gaze_color = "red"
 
-    if plot_eeg:
-        mne_raw = get_data(csv_file, cols, **kwargs)
+    if eeg_df is not None:
+        mne_raw = preprocess_raw_data(eeg_df, cols, **kwargs)
         if mne_raw is not None:
             # Convert MNE Raw data back to Pandas DataFrame
             data = mne_raw.get_data()  # Get the EEG data
@@ -134,15 +107,15 @@ def process_and_plot_eeg_data(
         else:
             logging.warning("No EEG data available")
 
-    if plot_audio and audio_file:
+    if audio_io is not None:
         try:
             # Load audio file
-            y, sr = librosa.load(audio_file)
+            y, sr = librosa.load(audio_io)
             audio_time = np.linspace(0, len(y) / sr, len(y))
 
-            if plot_eeg or plot_gaze:
+            if eeg_df is not None:
                 # Normalize audio to match EEG scale
-                y_normalized = y * (np.max(df[eeg_columns].values) - np.min(df[eeg_columns].values)) / 2
+                y_normalized = y * (np.max(eeg_df[eeg_columns].values) - np.min(eeg_df[eeg_columns].values)) / 2
                 ax.plot(audio_time, y_normalized + audio_offset, color=audio_color, alpha=0.3, label="Audio")
             else:
                 # Plot raw audio
@@ -152,10 +125,9 @@ def process_and_plot_eeg_data(
 
     # Plot gaze intensity if gaze file exists
     gaze_heatmap = None
-    if plot_gaze and gaze_file:
+    if gaze_df is not None:
         try:
             # --- Load gaze data ---
-            gaze_df = pd.read_csv(gaze_file)
             gaze_heatmap = plot_gaze_heatmap(gaze_df)
             # Parse numeric X/Y and handle blinks ("." becomes NaN)
             gaze_df["X"] = pd.to_numeric(gaze_df["X"], errors="coerce")
@@ -241,15 +213,15 @@ def process_and_plot_eeg_data(
 
     # Build title based on what's being plotted
     title_parts = []
-    if plot_eeg:
+    if eeg_df is not None:
         title_parts.append("EEG")
-    if plot_audio:
+    if audio_io is not None:
         title_parts.append("Audio")
-    if plot_gaze:
+    if gaze_df is not None:
         title_parts.append("Gaze")
 
     title = " + ".join(title_parts) if title_parts else "No Data Selected"
-    ax.set_title(f"{title} - {csv_file}")
+    ax.set_title(f"{title} - {name}")
 
     ax.legend(
         fontsize="small",  # Reduce font size
@@ -263,14 +235,4 @@ def process_and_plot_eeg_data(
     )
     ax.grid(True)
 
-    return fig, audio_file, gaze_heatmap
-
-
-def plot_raw_eeg_data(
-    csv_file: str, cols: tuple[int, int] = (21, 25)
-) -> tuple[plt.Figure, str | None, plt.Figure | None]:
-    """
-    Plot EEG time series data from a CSV file.
-    Returns the figure for Streamlit to display.
-    """
-    return process_and_plot_eeg_data(csv_file, cols, ica=False, notch_filter=None, bandpass=None)
+    return fig, audio_io, gaze_heatmap

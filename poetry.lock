@@ -1166,6 +1166,39 @@ files = [
 traitlets = "*"
 
 [[package]]
+name = "mne"
+version = "1.9.0"
+description = "MNE-Python project for MEG and EEG data analysis."
+optional = false
+python-versions = ">=3.10"
+files = [
+    {file = "mne-1.9.0-py3-none-any.whl", hash = "sha256:c26da9ac59bce963c5b25a3be9f5f61dd128f980cdc178a6fceef27743734306"},
+    {file = "mne-1.9.0.tar.gz", hash = "sha256:101967698b005a7f9071586e0469aebc83fe06f48717a95f3382a6f99c591162"},
+]
+
+[package.dependencies]
+decorator = "*"
+jinja2 = "*"
+lazy-loader = ">=0.3"
+matplotlib = ">=3.6"
+numpy = ">=1.23,<3"
+packaging = "*"
+pooch = ">=1.5"
+scipy = ">=1.9"
+tqdm = "*"
+
+[package.extras]
+dev = ["codespell", "graphviz", "intersphinx-registry (>=0.2405.27)", "ipython (!=8.7.0)", "memory-profiler", "mne-bids", "mne-connectivity", "mne-gui-addons", "mypy", "neo", "numpydoc", "pre-commit", "psutil", "pydata-sphinx-theme (>=0.15.2)", "pygments (>=2.13)", "pytest", "pytest (>=8.0)", "pytest-cov", "pytest-qt", "pytest-timeout", "pyxdf", "pyzmq (!=24.0.0)", "rcssmin", "ruff", "seaborn (!=0.11.2)", "selenium (>=4.27.1)", "sphinx (>=6)", "sphinx-copybutton", "sphinx-design", "sphinx-gallery (>=0.16)", "sphinxcontrib-bibtex (>=2.5)", "sphinxcontrib-towncrier", "sphinxcontrib-youtube", "toml-sort", "tomli", "towncrier (<24.7)", "twine", "vulture", "wheel"]
+doc = ["graphviz", "intersphinx-registry (>=0.2405.27)", "ipython (!=8.7.0)", "memory-profiler", "mne-bids", "mne-connectivity", "mne-gui-addons", "neo", "numpydoc", "psutil", "pydata-sphinx-theme (>=0.15.2)", "pygments (>=2.13)", "pytest", "pyxdf", "pyzmq (!=24.0.0)", "seaborn (!=0.11.2)", "selenium (>=4.27.1)", "sphinx (>=6)", "sphinx-copybutton", "sphinx-design", "sphinx-gallery (>=0.16)", "sphinxcontrib-bibtex (>=2.5)", "sphinxcontrib-towncrier", "sphinxcontrib-youtube", "towncrier (<24.7)"]
+full = ["antio (>=0.5.0)", "darkdetect", "defusedxml", "dipy", "edfio (>=0.2.1)", "eeglabio", "h5io (>=0.2.4)", "h5py", "imageio (>=2.6.1)", "imageio-ffmpeg (>=0.4.1)", "ipyevents", "ipympl", "ipython (!=8.7.0)", "ipywidgets", "joblib", "jupyter", "mffpy (>=0.5.7)", "mne-qt-browser", "neo", "nibabel", "nilearn", "numba", "openmeeg (>=2.5.5)", "pandas", "pillow", "pyarrow", "pybv", "pymatreader", "pyobjc-framework-cocoa (>=5.2.0)", "pyqt6 (!=6.6.0)", "pyqt6-qt6 (!=6.6.0,!=6.7.0)", "python-picard", "pyvista (>=0.32,!=0.35.2,!=0.38.0,!=0.38.1,!=0.38.2,!=0.38.3,!=0.38.4,!=0.38.5,!=0.38.6,!=0.42.0)", "pyvistaqt (>=0.4)", "qdarkstyle (!=3.2.2)", "qtpy", "scikit-learn", "sip", "snirf", "statsmodels", "threadpoolctl", "traitlets", "trame", "trame-vtk", "trame-vuetify", "vtk (>=9.2)", "xlrd"]
+full-no-qt = ["antio (>=0.5.0)", "darkdetect", "defusedxml", "dipy", "edfio (>=0.2.1)", "eeglabio", "h5io (>=0.2.4)", "h5py", "imageio (>=2.6.1)", "imageio-ffmpeg (>=0.4.1)", "ipyevents", "ipympl", "ipython (!=8.7.0)", "ipywidgets", "joblib", "jupyter", "mffpy (>=0.5.7)", "mne-qt-browser", "neo", "nibabel", "nilearn", "numba", "openmeeg (>=2.5.5)", "pandas", "pillow", "pyarrow", "pybv", "pymatreader", "pyobjc-framework-cocoa (>=5.2.0)", "python-picard", "pyvista (>=0.32,!=0.35.2,!=0.38.0,!=0.38.1,!=0.38.2,!=0.38.3,!=0.38.4,!=0.38.5,!=0.38.6,!=0.42.0)", "pyvistaqt (>=0.4)", "qdarkstyle (!=3.2.2)", "qtpy", "scikit-learn", "sip", "snirf", "statsmodels", "threadpoolctl", "traitlets", "trame", "trame-vtk", "trame-vuetify", "vtk (>=9.2)", "xlrd"]
+full-pyqt6 = ["antio (>=0.5.0)", "darkdetect", "defusedxml", "dipy", "edfio (>=0.2.1)", "eeglabio", "h5io (>=0.2.4)", "h5py", "imageio (>=2.6.1)", "imageio-ffmpeg (>=0.4.1)", "ipyevents", "ipympl", "ipython (!=8.7.0)", "ipywidgets", "joblib", "jupyter", "mffpy (>=0.5.7)", "mne-qt-browser", "neo", "nibabel", "nilearn", "numba", "openmeeg (>=2.5.5)", "pandas", "pillow", "pyarrow", "pybv", "pymatreader", "pyobjc-framework-cocoa (>=5.2.0)", "pyqt6 (!=6.6.0)", "pyqt6-qt6 (!=6.6.0,!=6.7.0)", "python-picard", "pyvista (>=0.32,!=0.35.2,!=0.38.0,!=0.38.1,!=0.38.2,!=0.38.3,!=0.38.4,!=0.38.5,!=0.38.6,!=0.42.0)", "pyvistaqt (>=0.4)", "qdarkstyle (!=3.2.2)", "qtpy", "scikit-learn", "sip", "snirf", "statsmodels", "threadpoolctl", "traitlets", "trame", "trame-vtk", "trame-vuetify", "vtk (>=9.2)", "xlrd"]
+full-pyside6 = ["antio (>=0.5.0)", "darkdetect", "defusedxml", "dipy", "edfio (>=0.2.1)", "eeglabio", "h5io (>=0.2.4)", "h5py", "imageio (>=2.6.1)", "imageio-ffmpeg (>=0.4.1)", "ipyevents", "ipympl", "ipython (!=8.7.0)", "ipywidgets", "joblib", "jupyter", "mffpy (>=0.5.7)", "mne-qt-browser", "neo", "nibabel", "nilearn", "numba", "openmeeg (>=2.5.5)", "pandas", "pillow", "pyarrow", "pybv", "pymatreader", "pyobjc-framework-cocoa (>=5.2.0)", "pyside6 (!=6.7.0,!=6.8.0,!=6.8.0.1)", "python-picard", "pyvista (>=0.32,!=0.35.2,!=0.38.0,!=0.38.1,!=0.38.2,!=0.38.3,!=0.38.4,!=0.38.5,!=0.38.6,!=0.42.0)", "pyvistaqt (>=0.4)", "qdarkstyle (!=3.2.2)", "qtpy", "scikit-learn", "sip", "snirf", "statsmodels", "threadpoolctl", "traitlets", "trame", "trame-vtk", "trame-vuetify", "vtk (>=9.2)", "xlrd"]
+hdf5 = ["h5io (>=0.2.4)", "pymatreader"]
+test = ["codespell", "ipython (!=8.7.0)", "mypy", "numpydoc", "pre-commit", "pytest (>=8.0)", "pytest-cov", "pytest-qt", "pytest-timeout", "ruff", "toml-sort", "tomli", "twine", "vulture", "wheel"]
+test-extra = ["codespell", "edfio (>=0.2.1)", "eeglabio", "imageio (>=2.6.1)", "imageio-ffmpeg (>=0.4.1)", "ipython (!=8.7.0)", "jupyter-client", "mne-bids", "mypy", "nbclient", "nbformat", "neo", "nitime", "numpydoc", "pre-commit", "pybv", "pytest (>=8.0)", "pytest-cov", "pytest-qt", "pytest-timeout", "ruff", "snirf", "sphinx-gallery", "statsmodels", "toml-sort", "tomli", "twine", "vulture", "wheel"]
+
+[[package]]
 name = "msgpack"
 version = "1.1.0"
 description = "MessagePack serializer"
@@ -2520,6 +2553,27 @@ files = [
 ]
 
 [[package]]
+name = "tqdm"
+version = "4.67.1"
+description = "Fast, Extensible Progress Meter"
+optional = false
+python-versions = ">=3.7"
+files = [
+    {file = "tqdm-4.67.1-py3-none-any.whl", hash = "sha256:26445eca388f82e72884e0d580d5464cd801a3ea01e63e5601bdff9ba6a48de2"},
+    {file = "tqdm-4.67.1.tar.gz", hash = "sha256:f8aef9c52c08c13a65f30ea34f4e5aac3fd1a34959879d7e59e63027286627f2"},
+]
+
+[package.dependencies]
+colorama = {version = "*", markers = "platform_system == \"Windows\""}
+
+[package.extras]
+dev = ["nbval", "pytest (>=6)", "pytest-asyncio (>=0.24)", "pytest-cov", "pytest-timeout"]
+discord = ["requests"]
+notebook = ["ipywidgets (>=6)"]
+slack = ["slack-sdk"]
+telegram = ["requests"]
+
+[[package]]
 name = "traitlets"
 version = "5.14.3"
 description = "Traitlets Python configuration system"
@@ -2629,4 +2683,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.11"
-content-hash = "84c00022f88a3285bd4220bb1d2ed35af7fc1ef5f7955cdac551f8a0baa2a41a"
+content-hash = "c28eea766d1e843d9b725eee8e7fdffdeb4303387b1a34cdf857d05ebb45a4c3"

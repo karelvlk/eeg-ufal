@@ -1,22 +1,7 @@
-import os
-import re
 import pandas as pd
 import mne
 import numpy as np
-
-
-def parse_filename(filename):
-    basename = os.path.basename(filename)
-    basename, _ = os.path.splitext(basename)
-    pattern = (
-        r"P(?P<participant_id>\d+)-(?P<order>\d+)-S(?P<sentence_id>\d+)-"
-        r"(?P<cond>[AU])-i(?P<cong>[CIM])(?P<image_id>\w+)"
-    )
-    m = re.match(pattern, basename)
-    if m:
-        return m.groupdict()
-    else:
-        return None
+import streamlit as st
 
 
 def load_csv_to_raw(csv_file, sfreq=256, drop_blink=True):
@@ -79,8 +64,9 @@ def load_csv_to_raw(csv_file, sfreq=256, drop_blink=True):
     return raw_eeg_band, raw_raw_eeg, raw_hsi
 
 
+@st.cache_data(show_spinner=False)
 def preprocess_raw_data(
-    file,
+    df: pd.DataFrame,
     cols: tuple[int, int],
     *,
     bandpass: None | tuple[float, float] = (1.0, 50.0),
@@ -89,7 +75,6 @@ def preprocess_raw_data(
     out_file=None,
 ) -> mne.io.RawArray | None:
     raw_eeg_channels = ["RAW_TP9", "RAW_AF7", "RAW_AF8", "RAW_TP10"]
-    df = pd.read_csv(file)
 
     if df.empty:
         return None
@@ -181,7 +166,3 @@ def apply_ica(
         raw.plot()
 
     return raw
-
-
-if __name__ == "__main__":
-    preprocess_raw_data("./ufal_emmt/preprocessed-data/eeg/See/P43-32-S191-A-U.csv", ica=True)

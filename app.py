@@ -1,72 +1,24 @@
 import streamlit as st
-import pandas as pd
-from pathlib import Path
-import re
 import src.processor as processor
+import pandas as pd
+from src.file_loader import GithubFileLoader, FileLoader
 
 # Set page configuration
 st.set_page_config(page_title="EEG Data Browser", layout="wide")
 
-# Define paths
-BASE_DATA_DIR = Path("./ufal_emmt/preprocessed-data/eeg")
-CATEGORIES = ["Read", "See", "Update", "Translate", "All"]
+
+# Singleton implementation for loader
+@st.cache_resource
+def get_loader():
+    # return GithubFileLoader(base_url="https://api.github.com/repos/ufal/eyetracked-multi-modal-translation")
+    return FileLoader(base_path="./ufal_emmt")
 
 
-def extract_participant_id(filename):
-    """Extract participant ID (P<number>) from filename."""
-    match = re.search(r"P\d+", filename)
-    return match.group(0) if match else None
+# Get the singleton instance
+loader = get_loader()
 
 
-def extract_sentence_id(filename):
-    """Extract sentence ID (S<number>) from filename."""
-    match = re.search(r"S\d+", filename)
-    return match.group(0) if match else None
-
-
-def get_csv_files(category, participant_filter=None, sentence_filter=None):
-    """
-    Get all CSV files for a given category or all categories,
-    optionally filtered by participant ID and sentence ID.
-    """
-    if category == "All":
-        files = []
-        for cat in CATEGORIES[:-1]:  # Exclude "All" from the list
-            cat_path = BASE_DATA_DIR / cat
-            if cat_path.exists():
-                files.extend(list(cat_path.glob("*.csv")))
-    else:
-        category_path = BASE_DATA_DIR / category
-        if category_path.exists():
-            files = list(category_path.glob("*.csv"))
-        else:
-            return []
-
-    # Apply filters if provided
-    if participant_filter and participant_filter != "All":
-        files = [f for f in files if extract_participant_id(f.name) == participant_filter]
-
-    if sentence_filter and sentence_filter != "All":
-        files = [f for f in files if extract_sentence_id(f.name) == sentence_filter]
-
-    return files
-
-
-def get_unique_identifiers(category, id_extractor, participant_filter=None, sentence_filter=None):
-    """
-    Get unique participant or sentence IDs from files in a category.
-    Can be filtered by participant or sentence ID.
-    """
-    # Get all files first, potentially filtered
-    files = get_csv_files(category, participant_filter, sentence_filter)
-
-    # Extract IDs from filenames
-    ids = [id_extractor(f.name) for f in files]
-    # Filter out None values and return unique IDs
-    return sorted(list(set(id for id in ids if id is not None)))
-
-
-def create_files_dataframe(files):
+def create_files_dataframe(data_units: list[dict]):
     """
     Create a dataframe with information about all files that match the current filters.
 
@@ -77,19 +29,13 @@ def create_files_dataframe(files):
         DataFrame with columns: Filename, Category, Participant, Sentence
     """
     data = []
-    for file in files:
-        filename = file.name
-        category = file.parts[-2]  # The parent directory is the category
-        participant_id = extract_participant_id(filename) or "N/A"
-        sentence_id = extract_sentence_id(filename) or "N/A"
-
+    for du in data_units:
         data.append(
             {
-                "Filename": filename,
-                "Category": category,
-                "Participant": participant_id,
-                "Sentence": sentence_id,
-                "Path": str(file),  # Store the full path for reference
+                "Filename": du["name"],
+                "Category": du["category"],
+                "Participant": du["participant_id"],
+                "Sentence": du["sentence_id"],
             }
         )
 
@@ -104,7 +50,7 @@ def main():
     st.sidebar.header("Controls")
 
     # Category selection
-    selected_category = st.sidebar.selectbox("Select Category", CATEGORIES)
+    selected_category = st.sidebar.selectbox("Select Category", loader.get_categories())
 
     # Initialize filter in session state if not present
     if "participant_filter" not in st.session_state:
@@ -124,17 +70,15 @@ def main():
         st.session_state.current_file_idx = 0
 
     # Get participant IDs with sentence filter
-    participant_ids = ["All"] + get_unique_identifiers(
+    participant_ids = ["All"] + loader.get_valid_participant_ids(
         selected_category,
-        extract_participant_id,
-        sentence_filter=(st.session_state.sentence_filter if st.session_state.sentence_filter != "All" else None),
+        sentence_id_filter=(st.session_state.sentence_filter if st.session_state.sentence_filter != "All" else None),
     )
 
     # Get sentence IDs with participant filter
-    sentence_ids = ["All"] + get_unique_identifiers(
+    sentence_ids = ["All"] + loader.get_valid_sentence_ids(
         selected_category,
-        extract_sentence_id,
-        participant_filter=(
+        participant_id_filter=(
             st.session_state.participant_filter if st.session_state.participant_filter != "All" else None
         ),
     )
@@ -155,14 +99,14 @@ def main():
     )
 
     # NOW we can get all files for the selected category with filters
-    all_files = get_csv_files(
-        selected_category,
-        participant_filter=(selected_participant if selected_participant != "All" else None),
-        sentence_filter=selected_sentence if selected_sentence != "All" else None,
+    all_files = loader.get_data_files(
+        category_filter=selected_category,
+        participant_id_filter=(selected_participant if selected_participant != "All" else None),
+        sentence_id_filter=(selected_sentence if selected_sentence != "All" else None),
     )
 
     if not all_files:
-        st.warning(f"No CSV files found with the selected filters.")
+        st.warning("No CSV files found with the selected filters.")
         return
 
     # Reset current file index if filters change
@@ -176,7 +120,7 @@ def main():
         st.session_state.current_file_idx = 0
 
     # File navigation AFTER the sidebar controls
-    file_names = [f"{i + 1}. {f.name}" for i, f in enumerate(all_files)]
+    file_names = [f"{i + 1}. {f['name']}" for i, f in enumerate(all_files)]
     nav_container = st.container()
     main_nav_col1, main_nav_col2, main_nav_col3 = nav_container.columns([1, 2, 1])
 
@@ -208,12 +152,17 @@ def main():
             st.rerun()
 
     # Update current file selection
-    current_file = all_files[st.session_state.current_file_idx]
+    current_data_unit = all_files[st.session_state.current_file_idx]
+    eeg_df, gaze_df, audio_io = loader.load_data(current_data_unit)
+
+    if eeg_df is None:
+        st.warning("No EEG data found")
+        return
 
     # File information badges
-    badge_category = current_file.parts[-2]
-    badge_participant_id = extract_participant_id(current_file.name) or "N/A"
-    badge_sentence_id = extract_sentence_id(current_file.name) or "N/A"
+    badge_category = current_data_unit["category"]
+    badge_participant_id = current_data_unit["participant_id"]
+    badge_sentence_id = current_data_unit["sentence_id"]
     st.markdown(
         f":violet-badge[Category: {badge_category}] :orange-badge[Participant: {badge_participant_id}] :blue-badge[Sentence: {badge_sentence_id}]"
     )
@@ -256,8 +205,7 @@ def main():
     )
 
     # Read CSV to get column names
-    df = pd.read_csv(current_file)
-    all_columns = list(df.columns)
+    all_columns = list(eeg_df.columns)
 
     # Allow user to select columns to plot
     start_col = st.sidebar.selectbox("Start Column", all_columns, index=min(21, len(all_columns) - 1))
@@ -267,15 +215,29 @@ def main():
     end_idx = all_columns.index(end_col) + 1  # +1 for inclusive range
 
     # Plot the data
-    fig, wav, gaze_heatmap = processor.process_and_plot_eeg_data(
-        current_file,
+    fig, wav, gaze_heatmap = processor.process_and_plot_data(
+        current_data_unit["name"],
+        eeg_df,
+        audio_io,
+        gaze_df,
+        st.session_state.gaze_window_size / 1000.0,  # Convert ms to seconds
         (start_idx, end_idx),
         ica=st.session_state.use_ica,
-        gaze_window_size=st.session_state.gaze_window_size / 1000.0,  # Convert ms to seconds
     )
 
     if st.session_state.compare_raw:
-        raw_fig, _, _ = processor.plot_raw_eeg_data(current_file, (start_idx, end_idx))
+        raw_fig, _, _ = processor.process_and_plot_data(
+            current_data_unit["name"],
+            eeg_df,
+            audio_io,
+            gaze_df,
+            st.session_state.gaze_window_size / 1000.0,
+            (start_idx, end_idx),
+            ica=None,
+            bandpass=None,
+            notch_filter=None,
+            out_file=None,
+        )
 
         if st.session_state.compare_raw_next_to_each_other:
             image_col1, image_col2 = st.columns(2)
@@ -289,39 +251,27 @@ def main():
     else:
         st.pyplot(fig)
 
-    if wav:
+    if wav is not None:
         st.audio(wav)
     else:
         st.warning("No audio file found")
 
-    if gaze_heatmap:
+    if gaze_heatmap is not None:
         st.pyplot(gaze_heatmap)
     else:
         st.warning("No gaze file found")
 
     # Show data preview
-    st.subheader("Data Preview")
-    st.dataframe(df.head())
+    st.subheader("EEG Data Preview")
+    st.dataframe(eeg_df.head())
 
-    # Move the DataFrame display to the sidebar
-    st.sidebar.subheader("Files List")
+    # # Move the DataFrame display to the sidebar
+    # st.sidebar.subheader("Files List")
 
-    # Create dataframe with all filtered files
+    # # Create dataframe with all filtered files
     files_df = create_files_dataframe(all_files)
-
-    # Highlight the currently selected row
-    current_file_path = str(current_file)
-
-    # Style the dataframe to highlight the selected row
-    def highlight_selected_row(row):
-        if row["Path"] == current_file_path:
-            return ["background-color: #ffffb3"] * len(row)
-        return [""] * len(row)
-
-    # Apply styling and display dataframe (excluding the Path column)
-    styled_df = files_df.style.apply(highlight_selected_row, axis=1)
     st.sidebar.dataframe(
-        styled_df.data[["Filename", "Category", "Participant", "Sentence"]],
+        files_df[["Filename", "Category", "Participant", "Sentence"]],
         use_container_width=True,
         height=600,
     )

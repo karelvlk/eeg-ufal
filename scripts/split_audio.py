@@ -43,7 +43,10 @@ def get_output_filename(base_name, phase):
         case "M":  # missing => not present (based on readmes)
             base_name = f"{base_name}-N"
 
-    return f"{base_name}.wav"
+    p, o, s, c1, c2 = base_name.split("-")
+    corrected_basename = f"{p}-{str(int(o)+1).zfill(2)}-{s}-{c1}-{c2}"
+
+    return f"{corrected_basename}.wav"
 
 
 def is_file_processed(audio_dir, base_name, phase):
