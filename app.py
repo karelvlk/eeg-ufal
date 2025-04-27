@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import src.processor as processor
 import pandas as pd
@@ -10,8 +11,17 @@ st.set_page_config(page_title="EEG Data Browser", layout="wide")
 # Singleton implementation for loader
 @st.cache_resource
 def get_loader():
-    # return GithubFileLoader(base_url="https://api.github.com/repos/ufal/eyetracked-multi-modal-translation")
-    return FileLoader(base_path="./ufal_emmt")
+    file_loader_type = os.getenv("FILE_LOADER_TYPE")
+    data_path = os.getenv("DATA_PATH")
+    print(f"file_loader_type: {file_loader_type}")
+    print(f"data_path: {data_path}")
+    if file_loader_type == "local":
+        return FileLoader(base_path=data_path)
+    elif file_loader_type == "github":
+        return GithubFileLoader(base_url=data_path)
+    else:
+        raise ValueError(f"Invalid file loader type: {file_loader_type}")
+
 
 
 # Get the singleton instance

@@ -4,6 +4,8 @@ from pydub import AudioSegment
 from datetime import datetime
 import logging
 
+BASE_DIR = "../../ufal_emmt"
+
 # Set up logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -58,7 +60,7 @@ def is_file_processed(audio_dir, base_name, phase):
 
 def setup_audio_directories():
     """Setup the audio directory structure and remove old directories"""
-    audio_dir = "../ufal_emmt/preprocessed-data/audio"
+    audio_dir = os.path.join(BASE_DIR, "preprocessed-data/audio")
     phases = ["Read", "Translate", "See", "Update"]
 
     # Create main audio directory
@@ -248,7 +250,7 @@ def process_probe_dir(probe_dir, audio_dir):
 
 
 def main():
-    base_dir = "../ufal_emmt/probes"
+    base_dir = os.path.join(BASE_DIR, "probes")
 
     try:
         # Setup audio directories
