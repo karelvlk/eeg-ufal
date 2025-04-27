@@ -49,7 +49,7 @@ def plot_gaze_heatmap(df: pd.DataFrame) -> plt.Figure:
         x=fixation_df["X"], y=fixation_df["Y"], cmap="Blues", fill=True, alpha=0.5, ax=axes[2], label="Fixation"
     )
     axes[2].set_title("Combined Heatmap of Events")
-    
+
     return fig
 
 
@@ -85,10 +85,10 @@ def process_and_plot_data(
     audio_offset = -200
 
     # Define colors for different signals
-    audio_color = "gray"
+    audio_color = "mediumslateblue"
     gaze_color = "red"
 
-    if eeg_df is not None:
+    if eeg_df is not None and len(eeg_df) > 1:
         mne_raw = preprocess_raw_data(eeg_df, cols, **kwargs)
         if mne_raw is not None:
             # Convert MNE Raw data back to Pandas DataFrame
@@ -124,10 +124,11 @@ def process_and_plot_data(
 
     # Plot gaze intensity if gaze file exists
     gaze_heatmap = None
-    if gaze_df is not None:
+    if gaze_df is not None and len(gaze_df) > 1:
         try:
             # --- Load gaze data ---
             gaze_heatmap = plot_gaze_heatmap(gaze_df)
+
             # Parse numeric X/Y and handle blinks ("." becomes NaN)
             gaze_df["X"] = pd.to_numeric(gaze_df["X"], errors="coerce")
             gaze_df["Y"] = pd.to_numeric(gaze_df["Y"], errors="coerce")

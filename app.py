@@ -23,11 +23,11 @@ def get_loader():
         raise ValueError(f"Invalid file loader type: {file_loader_type}")
 
 
-
 # Get the singleton instance
 loader = get_loader()
 
 
+@st.cache_data
 def create_files_dataframe(data_units: list[dict]):
     """
     Create a dataframe with information about all files that match the current filters.
@@ -50,6 +50,54 @@ def create_files_dataframe(data_units: list[dict]):
         )
 
     return pd.DataFrame(data)
+
+
+@st.cache_data
+def get_participant_ids(category, sentence_filter):
+    return ["All"] + loader.get_valid_participant_ids(
+        category,
+        sentence_id_filter=(sentence_filter if sentence_filter != "All" else None),
+    )
+
+
+@st.cache_data
+def get_sentence_ids(category, participant_filter):
+    return ["All"] + loader.get_valid_sentence_ids(
+        category,
+        participant_id_filter=(participant_filter if participant_filter != "All" else None),
+    )
+
+
+@st.cache_data
+def load_file_data(data_unit):
+    return loader.load_data(data_unit)
+
+
+@st.cache_data
+def process_and_plot_data_cached(
+    file_name,
+    eeg_df,
+    audio_io,
+    gaze_df,
+    window_size,
+    column_range,
+    ica=None,
+    bandpass=(1.0, 50.0),
+    notch_filter=True,
+    out_file=None,
+):
+    return processor.process_and_plot_data(
+        file_name,
+        eeg_df,
+        audio_io,
+        gaze_df,
+        window_size,
+        column_range,
+        ica=ica,
+        bandpass=bandpass,
+        notch_filter=notch_filter,
+        out_file=out_file,
+    )
 
 
 # Main app function
@@ -79,19 +127,11 @@ def main():
         # Reset file index when filter changes
         st.session_state.current_file_idx = 0
 
-    # Get participant IDs with sentence filter
-    participant_ids = ["All"] + loader.get_valid_participant_ids(
-        selected_category,
-        sentence_id_filter=(st.session_state.sentence_filter if st.session_state.sentence_filter != "All" else None),
-    )
+    # Get participant IDs with sentence filter - using cached function
+    participant_ids = get_participant_ids(selected_category, st.session_state.sentence_filter)
 
-    # Get sentence IDs with participant filter
-    sentence_ids = ["All"] + loader.get_valid_sentence_ids(
-        selected_category,
-        participant_id_filter=(
-            st.session_state.participant_filter if st.session_state.participant_filter != "All" else None
-        ),
-    )
+    # Get sentence IDs with participant filter - using cached function
+    sentence_ids = get_sentence_ids(selected_category, st.session_state.participant_filter)
 
     # Participant and Sentence filters with callbacks
     selected_participant = st.sidebar.selectbox(
@@ -108,12 +148,17 @@ def main():
         on_change=on_sentence_change,
     )
 
+    # Cache this operation
+    @st.cache_data
+    def get_filtered_files(category, participant, sentence):
+        return loader.get_data_files(
+            category_filter=category,
+            participant_id_filter=(participant if participant != "All" else None),
+            sentence_id_filter=(sentence if sentence != "All" else None),
+        )
+
     # NOW we can get all files for the selected category with filters
-    all_files = loader.get_data_files(
-        category_filter=selected_category,
-        participant_id_filter=(selected_participant if selected_participant != "All" else None),
-        sentence_id_filter=(selected_sentence if selected_sentence != "All" else None),
-    )
+    all_files = get_filtered_files(selected_category, selected_participant, selected_sentence)
 
     if not all_files:
         st.warning("No CSV files found with the selected filters.")
@@ -163,7 +208,7 @@ def main():
 
     # Update current file selection
     current_data_unit = all_files[st.session_state.current_file_idx]
-    eeg_df, gaze_df, audio_io = loader.load_data(current_data_unit)
+    eeg_df, gaze_df, audio_io = load_file_data(current_data_unit)
 
     if eeg_df is None:
         st.warning("No EEG data found")
@@ -224,8 +269,8 @@ def main():
     start_idx = all_columns.index(start_col)
     end_idx = all_columns.index(end_col) + 1  # +1 for inclusive range
 
-    # Plot the data
-    fig, wav, gaze_heatmap = processor.process_and_plot_data(
+    # Plot the data using cached function
+    fig, wav, gaze_heatmap = process_and_plot_data_cached(
         current_data_unit["name"],
         eeg_df,
         audio_io,
@@ -236,7 +281,7 @@ def main():
     )
 
     if st.session_state.compare_raw:
-        raw_fig, _, _ = processor.process_and_plot_data(
+        raw_fig, _, _ = process_and_plot_data_cached(
             current_data_unit["name"],
             eeg_df,
             audio_io,
@@ -275,10 +320,7 @@ def main():
     st.subheader("EEG Data Preview")
     st.dataframe(eeg_df.head())
 
-    # # Move the DataFrame display to the sidebar
-    # st.sidebar.subheader("Files List")
-
-    # # Create dataframe with all filtered files
+    # Create dataframe with all filtered files - using cached function
     files_df = create_files_dataframe(all_files)
     st.sidebar.dataframe(
         files_df[["Filename", "Category", "Participant", "Sentence"]],

@@ -96,7 +96,12 @@ def preprocess_raw_data(
     raw = mne.io.RawArray(df[raw_eeg_channels].T.values, info)
 
     if bandpass is not None:
-        raw.filter(l_freq=bandpass[0], h_freq=bandpass[1], verbose=False)
+        # Make sure bandpass is a tuple or list with two values before indexing
+        if isinstance(bandpass, (tuple, list)) and len(bandpass) == 2:
+            raw.filter(l_freq=bandpass[0], h_freq=bandpass[1], verbose=False)
+        else:
+            # Log a warning but don't crash
+            print(f"Warning: Invalid bandpass value: {bandpass}, expected tuple or list with 2 elements")
 
     if notch_filter is not None:
         raw.notch_filter(freqs=notch_filter, verbose=False)

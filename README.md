@@ -40,4 +40,3 @@ poetry run streamlit run app.py
 - Python 3.11+
 - Dependencies as specified in pyproject.toml (automatically installed by Poetry)
 
-

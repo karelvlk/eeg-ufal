@@ -1,12 +1,11 @@
-import requests
 import os
 import re
 import io
-import base64
+import logging
+import requests
 import pandas as pd
 import streamlit as st
 from typing import Literal
-import logging
 from enum import Enum
 
 LOCAL_DEBUG = True
@@ -23,7 +22,13 @@ class FileLoader:
     def __init__(self, base_path: str):
         self.base_path = base_path
         self.repo_structure = None
-        self.categories = ["Read", "See", "Update", "Translate", "All"]
+        self.categories: list[Literal["Read", "See", "Update", "Translate", "All"]] = [
+            "Read",
+            "See",
+            "Update",
+            "Translate",
+            "All",
+        ]
         self.repo_structure = self.get_repo_structure()
 
         # Pre-index files by category and basename
@@ -32,7 +37,7 @@ class FileLoader:
         self.audio_files: dict[str, dict[str, str]] = {cat: {} for cat in self.categories}
         self.index_files()
 
-    def get_categories(self) -> list[str]:
+    def get_categories(self) -> list[Literal["Read", "See", "Update", "Translate", "All"]]:
         return self.categories
 
     def index_files(self):
@@ -237,9 +242,10 @@ class GithubFileLoader(FileLoader):
         self.api_base_url = base_url
         super().__init__(base_path=base_url)
 
-    def get_repo_structure(self):
+    @st.cache_data
+    def get_repo_structure(_self):
         """Get the repository structure from GitHub API."""
-        url = f"{self.api_base_url}/git/trees/main?recursive=1"
+        url = f"{_self.api_base_url}/git/trees/main?recursive=1"
         print("calling api:", url)
         response = requests.get(url)
         if response.status_code != 200:
@@ -260,8 +266,9 @@ class GithubFileLoader(FileLoader):
                 st.error("Invalid GitHub API response structure")
             return []
 
+    @st.cache_data
     def get_data_files(
-        self,
+        _self,
         category_filter: Literal["Read", "See", "Update", "Translate", "All"] = "All",
         participant_id_filter: str | None = None,
         sentence_id_filter: str | None = None,
@@ -282,11 +289,11 @@ class GithubFileLoader(FileLoader):
 
         # Determine which categories to include
         categories_to_search = (
-            [category_filter] if category_filter != "All" else [cat for cat in self.categories if cat != "All"]
+            [category_filter] if category_filter != "All" else [cat for cat in _self.categories if cat != "All"]
         )
 
         for category in categories_to_search:
-            for basename, eeg_info in self.eeg_files[category].items():
+            for basename, eeg_info in _self.eeg_files[category].items():
                 # Apply filters
                 if participant_id_filter and eeg_info["participant_id"] != participant_id_filter:
                     continue
@@ -294,32 +301,39 @@ class GithubFileLoader(FileLoader):
                     continue
 
                 # Retrieve corresponding files
-                gaze_path = self.gaze_files[category].get(basename)
-                audio_path = self.audio_files[category].get(basename)
+                gaze_path = _self.gaze_files[category].get(basename)
+                audio_path = _self.audio_files[category].get(basename)
 
                 data_unit = {
                     "name": basename,
                     "participant_id": eeg_info["participant_id"],
                     "sentence_id": eeg_info["sentence_id"],
                     "category": category,
-                    "eeg": f"{self.raw_base_url}/{eeg_info['path']}",
-                    "gaze": f"{self.raw_base_url}/{gaze_path}" if gaze_path else None,
-                    "audio": f"{self.raw_base_url}/{audio_path}" if audio_path else None,
+                    "eeg": f"{_self.raw_base_url}/{eeg_info['path']}",
+                    "gaze": f"{_self.raw_base_url}/{gaze_path}" if gaze_path else None,
+                    "audio": f"{_self.raw_base_url}/{audio_path}" if audio_path else None,
                 }
 
                 data_units.append(data_unit)
 
         return data_units
 
-    def load_data(self, data_unit: dict) -> tuple[pd.DataFrame | None, pd.DataFrame | None, io.BytesIO | None]:
-        eeg = None
-        gaze = None
-        audio = None
+    @st.cache_data
+    def load_data(_self, data_unit: dict) -> tuple[pd.DataFrame | None, pd.DataFrame | None, io.BytesIO | None]:
+        """
+        Load data from GitHub, with Streamlit caching.
 
+        Returns:
+            Tuple of (eeg, gaze, audio) data
+        """
         print("calling apis")
         print("   eeg:", data_unit["eeg"])
         print("   gaze:", data_unit["gaze"])
         print("   audio:", data_unit["audio"])
+
+        eeg = None
+        gaze = None
+        audio = None
 
         if data_unit["eeg"]:
             try:
