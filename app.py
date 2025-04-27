@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from pathlib import Path
 import re
-import processor
+import src.processor as processor
 
 # Set page configuration
 st.set_page_config(page_title="EEG Data Browser", layout="wide")

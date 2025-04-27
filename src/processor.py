@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 import librosa
 import librosa.display
 import numpy as np
-from data_preprocessing import preprocess_raw_data
 import streamlit as st
 import seaborn as sns
+from src.data_preprocessing import preprocess_raw_data
 
 
 @st.cache_data(show_spinner=False)

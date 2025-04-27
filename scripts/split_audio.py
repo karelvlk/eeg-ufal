@@ -55,7 +55,7 @@ def is_file_processed(audio_dir, base_name, phase):
 
 def setup_audio_directories():
     """Setup the audio directory structure and remove old directories"""
-    audio_dir = "./ufal_emmt/preprocessed-data/audio"
+    audio_dir = "../ufal_emmt/preprocessed-data/audio"
     phases = ["Read", "Translate", "See", "Update"]
 
     # Create main audio directory
@@ -245,7 +245,7 @@ def process_probe_dir(probe_dir, audio_dir):
 
 
 def main():
-    base_dir = "./ufal_emmt/probes"
+    base_dir = "../ufal_emmt/probes"
 
     try:
         # Setup audio directories
