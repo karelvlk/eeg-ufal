@@ -3,6 +3,7 @@ import streamlit as st
 import src.processor as processor
 import pandas as pd
 from src.file_loader import GithubFileLoader, FileLoader
+import plotly.graph_objects as go
 
 # Set page configuration
 st.set_page_config(page_title="EEG Data Browser", layout="wide")
@@ -86,7 +87,7 @@ def process_and_plot_data_cached(
     notch_filter=True,
     out_file=None,
 ):
-    return processor.process_and_plot_data(
+    return processor.create_interactive_plot(
         file_name,
         eeg_df,
         audio_io,
@@ -270,7 +271,7 @@ def main():
     end_idx = all_columns.index(end_col) + 1  # +1 for inclusive range
 
     # Plot the data using cached function
-    fig, wav, gaze_heatmap = process_and_plot_data_cached(
+    figures = process_and_plot_data_cached(
         current_data_unit["name"],
         eeg_df,
         audio_io,
@@ -280,8 +281,16 @@ def main():
         ica=st.session_state.use_ica,
     )
 
+    if isinstance(figures, tuple):
+        main_fig, heatmap_fig = figures
+        st.plotly_chart(main_fig, use_container_width=True)
+        if heatmap_fig is not None:
+            st.plotly_chart(heatmap_fig, use_container_width=True)
+    else:
+        st.plotly_chart(figures, use_container_width=True)
+
     if st.session_state.compare_raw:
-        raw_fig, _, _ = process_and_plot_data_cached(
+        raw_figures = process_and_plot_data_cached(
             current_data_unit["name"],
             eeg_df,
             audio_io,
@@ -295,26 +304,31 @@ def main():
         )
 
         if st.session_state.compare_raw_next_to_each_other:
-            image_col1, image_col2 = st.columns(2)
-            with image_col1:
-                st.pyplot(fig)
-            with image_col2:
-                st.pyplot(raw_fig)
+            col1, col2 = st.columns(2)
+            with col1:
+                if isinstance(figures, tuple):
+                    st.plotly_chart(figures[0], use_container_width=True)
+                else:
+                    st.plotly_chart(figures, use_container_width=True)
+            with col2:
+                if isinstance(raw_figures, tuple):
+                    st.plotly_chart(raw_figures[0], use_container_width=True)
+                else:
+                    st.plotly_chart(raw_figures, use_container_width=True)
         else:
-            st.pyplot(fig)
-            st.pyplot(raw_fig)
-    else:
-        st.pyplot(fig)
+            if isinstance(figures, tuple):
+                st.plotly_chart(figures[0], use_container_width=True)
+            else:
+                st.plotly_chart(figures, use_container_width=True)
+            if isinstance(raw_figures, tuple):
+                st.plotly_chart(raw_figures[0], use_container_width=True)
+            else:
+                st.plotly_chart(raw_figures, use_container_width=True)
 
-    if wav is not None:
-        st.audio(wav)
+    if audio_io is not None:
+        st.audio(audio_io)
     else:
         st.warning("No audio file found")
-
-    if gaze_heatmap is not None:
-        st.pyplot(gaze_heatmap)
-    else:
-        st.warning("No gaze file found")
 
     # Show data preview
     st.subheader("EEG Data Preview")
