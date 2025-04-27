@@ -90,16 +90,16 @@ def preprocess_raw_data(
     # Ensure no NaN values remain by filling any remaining ones with 0
     df.fillna(0, inplace=True)
 
-    # Create MNE RawArray (you’ll need to reshape and adjust metadata accordingly)
+    # Create MNE RawArray (you'll need to reshape and adjust metadata accordingly)
     sfreq = 256  # MUSE2 typically samples at 256Hz
     info = mne.create_info(ch_names=raw_eeg_channels, sfreq=sfreq, ch_types="eeg")
     raw = mne.io.RawArray(df[raw_eeg_channels].T.values, info)
 
     if bandpass is not None:
-        raw.filter(l_freq=bandpass[0], h_freq=bandpass[1])
+        raw.filter(l_freq=bandpass[0], h_freq=bandpass[1], verbose=False)
 
     if notch_filter is not None:
-        raw.notch_filter(freqs=notch_filter)
+        raw.notch_filter(freqs=notch_filter, verbose=False)
 
     if ica:
         raw = apply_ica(raw, len(raw_eeg_channels))

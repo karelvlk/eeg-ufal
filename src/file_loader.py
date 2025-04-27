@@ -225,11 +225,23 @@ class GithubFileLoader(FileLoader):
     loader_type: LoaderType = LoaderType.GITHUB
 
     def __init__(self, base_url: str):
+        # Convert GitHub API URL to raw content URL format if needed
+        if "api.github.com/repos" in base_url:
+            # Extract owner and repo from API URL
+            parts = base_url.split("repos/")[1].split("/")
+            owner, repo = parts[0], parts[1]
+            self.raw_base_url = f"https://raw.githubusercontent.com/{owner}/{repo}/refs/heads/main"
+        else:
+            self.raw_base_url = base_url
+
+        self.api_base_url = base_url
         super().__init__(base_path=base_url)
 
     def get_repo_structure(self):
         """Get the repository structure from GitHub API."""
-        response = requests.get(f"{self.base_path}/git/trees/main?recursive=1")
+        url = f"{self.api_base_url}/git/trees/main?recursive=1"
+        print("calling api:", url)
+        response = requests.get(url)
         if response.status_code != 200:
             if LOCAL_DEBUG:
                 logging.error(f"Failed to fetch repository structure: {response.status_code}")
@@ -248,66 +260,107 @@ class GithubFileLoader(FileLoader):
                 st.error("Invalid GitHub API response structure")
             return []
 
-    def get_text_file_content(self, path: str) -> io.StringIO | None:
-        response = requests.get(path)
+    def get_data_files(
+        self,
+        category_filter: Literal["Read", "See", "Update", "Translate", "All"] = "All",
+        participant_id_filter: str | None = None,
+        sentence_id_filter: str | None = None,
+    ):
+        """
+        Get data files that match the participant_id and sentence_id filters.
 
-        if response.status_code != 200:
-            if LOCAL_DEBUG:
-                logging.error(f"Failed to fetch data: {response.status_code}")
-            else:
-                st.error(f"Failed to fetch data: {response.status_code}")
-            return None
+        Args:
+            category_filter: Filter by task category ("Read", "See", "Update", "Translate" or "All")
+            participant_id_filter: Optional filter for participant ID (format: P<number>)
+            sentence_id_filter: Optional filter for sentence ID (format: S<number>)
 
-        # GitHub API returns base64 encoded content
-        content = response.json().get("content", "")
-        if content:
-            decoded_content = base64.b64decode(content).decode("utf-8")
-            return io.StringIO(decoded_content)
-        return None
+        Returns:
+            List of data units with matching files
+        """
+        # Build data units using the pre-indexed files
+        data_units = []
 
-    def get_binary_file_content(self, path: str) -> io.BytesIO | None:
-        response = requests.get(path)
-        if response.status_code != 200:
-            if LOCAL_DEBUG:
-                logging.error(f"Failed to fetch data: {response.status_code}")
-            else:
-                st.error(f"Failed to fetch data: {response.status_code}")
-            return None
+        # Determine which categories to include
+        categories_to_search = (
+            [category_filter] if category_filter != "All" else [cat for cat in self.categories if cat != "All"]
+        )
 
-        # GitHub API returns base64 encoded content
-        content = response.json().get("content", "")
-        if content:
-            decoded_content = base64.b64decode(content)
-            return io.BytesIO(decoded_content)
-        return None
+        for category in categories_to_search:
+            for basename, eeg_info in self.eeg_files[category].items():
+                # Apply filters
+                if participant_id_filter and eeg_info["participant_id"] != participant_id_filter:
+                    continue
+                if sentence_id_filter and eeg_info["sentence_id"] != sentence_id_filter:
+                    continue
+
+                # Retrieve corresponding files
+                gaze_path = self.gaze_files[category].get(basename)
+                audio_path = self.audio_files[category].get(basename)
+
+                data_unit = {
+                    "name": basename,
+                    "participant_id": eeg_info["participant_id"],
+                    "sentence_id": eeg_info["sentence_id"],
+                    "category": category,
+                    "eeg": f"{self.raw_base_url}/{eeg_info['path']}",
+                    "gaze": f"{self.raw_base_url}/{gaze_path}" if gaze_path else None,
+                    "audio": f"{self.raw_base_url}/{audio_path}" if audio_path else None,
+                }
+
+                data_units.append(data_unit)
+
+        return data_units
 
     def load_data(self, data_unit: dict) -> tuple[pd.DataFrame | None, pd.DataFrame | None, io.BytesIO | None]:
         eeg = None
         gaze = None
         audio = None
 
+        print("calling apis")
+        print("   eeg:", data_unit["eeg"])
+        print("   gaze:", data_unit["gaze"])
+        print("   audio:", data_unit["audio"])
+
         if data_unit["eeg"]:
-            eeg_io = self.get_text_file_content(data_unit["eeg"])
-            if eeg_io:
-                eeg = pd.read_csv(eeg_io)
+            try:
+                eeg = pd.read_csv(data_unit["eeg"])
+            except Exception as e:
+                if LOCAL_DEBUG:
+                    logging.error(f"Failed to load EEG data: {e}")
+                else:
+                    st.error(f"Failed to load EEG data: {e}")
+
         if data_unit["gaze"]:
-            gaze_io = self.get_text_file_content(data_unit["gaze"])
-            if gaze_io:
-                gaze = pd.read_csv(gaze_io)
+            try:
+                gaze = pd.read_csv(data_unit["gaze"])
+            except Exception as e:
+                if LOCAL_DEBUG:
+                    logging.error(f"Failed to load gaze data: {e}")
+                else:
+                    st.error(f"Failed to load gaze data: {e}")
+
         if data_unit["audio"]:
-            audio = self.get_binary_file_content(data_unit["audio"])
+            try:
+                response = requests.get(data_unit["audio"])
+                if response.status_code == 200:
+                    audio = io.BytesIO(response.content)
+            except Exception as e:
+                if LOCAL_DEBUG:
+                    logging.error(f"Failed to load audio data: {e}")
+                else:
+                    st.error(f"Failed to load audio data: {e}")
 
         return eeg, gaze, audio
 
 
 if __name__ == "__main__":
-    # loader = GithubFileLoader(base_url="https://api.github.com/repos/ufal/eyetracked-multi-modal-translation")
-    loader = FileLoader(base_path="../ufal_emmt")
+    loader = GithubFileLoader(base_url="https://api.github.com/repos/ufal/eyetracked-multi-modal-translation")
+    # loader = FileLoader(base_path="../ufal_emmt")
     ds = loader.get_data_files(category_filter="Read", participant_id_filter="P03", sentence_id_filter="S084")
     # ds = loader.get_data_files(category_filter="Read", participant_id_filter="P03", sentence_id_filter="S092")
     for d in ds:
         print("\n>", d)
-    # # du = loader.get_data_files(category_filter="Read", participant_id_filter=None, sentence_id_filter=None)
+    du = loader.get_data_files(category_filter="Read", participant_id_filter=None, sentence_id_filter=None)
     # # print(du)
     # eeg, gaze, audio = loader.load_data(du)
     # print(eeg)

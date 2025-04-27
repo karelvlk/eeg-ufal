@@ -49,8 +49,7 @@ def plot_gaze_heatmap(df: pd.DataFrame) -> plt.Figure:
         x=fixation_df["X"], y=fixation_df["Y"], cmap="Blues", fill=True, alpha=0.5, ax=axes[2], label="Fixation"
     )
     axes[2].set_title("Combined Heatmap of Events")
-    axes[2].legend()
-
+    
     return fig
 
 
@@ -137,19 +136,22 @@ def process_and_plot_data(
             gaze_df["TimeDT"] = pd.to_datetime(gaze_df["TimeStamp"], format="%H:%M:%S.%f", errors="coerce")
             gaze_df = gaze_df.dropna(subset=["TimeDT", "X", "Y"])  # Skip blinks
 
+            # Create an explicit copy to avoid the SettingWithCopyWarning
+            gaze_df = gaze_df.copy()
+
             # Compute elapsed time
-            gaze_df["Time"] = (gaze_df["TimeDT"] - gaze_df["TimeDT"].min()).dt.total_seconds()
+            gaze_df.loc[:, "Time"] = (gaze_df["TimeDT"] - gaze_df["TimeDT"].min()).dt.total_seconds()
 
             # Compute delta movement (absolute change)
-            gaze_df["deltaX"] = gaze_df["X"].diff().abs()
-            gaze_df["deltaY"] = gaze_df["Y"].diff().abs()
-            gaze_df["Movement"] = gaze_df["deltaX"] + gaze_df["deltaY"]
+            gaze_df.loc[:, "deltaX"] = gaze_df["X"].diff().abs()
+            gaze_df.loc[:, "deltaY"] = gaze_df["Y"].diff().abs()
+            gaze_df.loc[:, "Movement"] = gaze_df["deltaX"] + gaze_df["deltaY"]
 
             # Bin into time windows
             window_size = gaze_window_size  # seconds
             max_time = gaze_df["Time"].max()
             bins = np.arange(0, max_time + window_size, window_size)
-            gaze_df["bin"] = np.floor(gaze_df["Time"] / window_size).astype(int)
+            gaze_df.loc[:, "bin"] = np.floor(gaze_df["Time"] / window_size).astype(int)
 
             # Sum movement per time window
             movement_per_bin = gaze_df.groupby("bin")["Movement"].sum().reindex(np.arange(len(bins) - 1), fill_value=0)
@@ -185,7 +187,9 @@ def process_and_plot_data(
             if "Event" in gaze_df.columns:
                 event_df = gaze_df.dropna(subset=["Event", "Time"])
                 unique_events = event_df["Event"].unique()
-                event_colors = plt.cm.tab10.colors  # Up to 10 distinct colors
+                # Fix colormap reference - use discrete color values from tab10
+                cmap = plt.cm.get_cmap("tab10")
+                event_colors = [cmap(i) for i in range(10)]  # Get 10 colors from the tab10 colormap
                 color_map = {event: event_colors[i % len(event_colors)] for i, event in enumerate(unique_events)}
 
                 for event in unique_events:
