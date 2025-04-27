@@ -6,3 +6,11 @@ This repository contains the code used to analyze the EEG data using the UFAL's 
 
 The data can be downloaded from [here](https://github.com/ufal/emmt).
 
+## Run streamlit app for visualization
+
+```bash
+poetry install
+poetry run streamlit run app.py
+```
+
+
