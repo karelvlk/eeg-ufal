@@ -387,22 +387,30 @@ def main():
 
         # Show EEG data if available and user wants to see it
         if st.session_state.show_eeg and processed_data["eeg_data"] is not None:
-            eeg_chart = processor.plot_interactive_eeg(processed_data["eeg_data"], processed_data["eeg_channels"])
+            eeg_chart = processor.plot_interactive_eeg(
+                processed_data["eeg_data"], processed_data["eeg_channels"], x_min=0.0, x_max=processed_data["max_time"]
+            )
             st.altair_chart(eeg_chart, use_container_width=True)
 
         # Show audio if available and user wants to see it
         if st.session_state.show_audio and processed_data["audio_data"] is not None:
-            audio_chart = processor.plot_interactive_audio(processed_data["audio_data"])
+            audio_chart = processor.plot_interactive_audio(
+                processed_data["audio_data"], x_min=0.0, x_max=processed_data["max_time"]
+            )
             st.altair_chart(audio_chart, use_container_width=True)
 
         # Show gaze movement if available and user wants to see it
         if st.session_state.show_gaze and processed_data["gaze_movement_data"] is not None:
-            gaze_chart = processor.plot_interactive_gaze_movement(processed_data["gaze_movement_data"])
+            gaze_chart = processor.plot_interactive_gaze_movement(
+                processed_data["gaze_movement_data"], x_min=0.0, x_max=processed_data["max_time"]
+            )
             st.altair_chart(gaze_chart, use_container_width=True)
 
         # Show events if available and user wants to see them
         if st.session_state.show_events and processed_data.get("event_data") is not None:
-            events_chart = processor.plot_interactive_events(processed_data["event_data"])
+            events_chart = processor.plot_interactive_events(
+                processed_data["event_data"], x_min=0.0, x_max=processed_data["max_time"]
+            )
             if events_chart:
                 st.altair_chart(events_chart, use_container_width=True)
 

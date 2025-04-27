@@ -77,6 +77,7 @@ def prepare_interactive_data(
         "gaze_movement_data": None,
         "name": name,
         "eeg_channels": [],
+        "max_time": 0.0,  # Will store the maximum time across all data sources
     }
 
     # Process EEG data
@@ -96,6 +97,7 @@ def prepare_interactive_data(
 
             result["eeg_data"] = eeg_long_df
             result["eeg_channels"] = eeg_columns
+            result["max_time"] = max(result["max_time"], time.max())
 
     # Process audio data
     if audio_io is not None:
@@ -112,6 +114,7 @@ def prepare_interactive_data(
 
             result["audio_data"] = audio_df
             result["sample_rate"] = sr
+            result["max_time"] = max(result["max_time"], audio_time.max())
         except Exception as e:
             logging.warning(f"Failed to load audio file and process it: {e}")
 
@@ -153,12 +156,14 @@ def prepare_interactive_data(
             gaze_movement_df = pd.DataFrame({"Time": bins[:-1], "Movement": movement_per_bin.values})
 
             result["gaze_movement_data"] = gaze_movement_df
+            result["max_time"] = max(result["max_time"], max_time)
 
             # Process events if present
             if "Event" in gaze_df.columns:
                 event_df = gaze_df.dropna(subset=["Event", "Time"])
                 if not event_df.empty:
                     result["event_data"] = event_df[["Time", "Event"]].copy()
+                    result["max_time"] = max(result["max_time"], event_df["Time"].max())
 
         except Exception as e:
             logging.warning(f"Failed to load gaze file and process it: {e}")
@@ -347,50 +352,115 @@ def process_and_plot_data(
     return fig, audio_io, gaze_heatmap
 
 
-def plot_interactive_eeg(data: pd.DataFrame, channels: list) -> alt.Chart:
+def plot_interactive_eeg(
+    data: pd.DataFrame, channels: list, x_min: float = 0.0, x_max: float | None = None
+) -> alt.Chart:
     """Create an interactive EEG chart with Altair"""
     selection = alt.selection_point(fields=["Channel"], bind="legend")
 
+    # Use provided x-axis range or calculate from data
+    if x_max is None:
+        x_max = data["Time"].max()
+
+    # Create a scale indicator
+    scale_text = (
+        alt.Chart(pd.DataFrame({"x": [x_min + 1], "y": [0], "text": ["1s"]}))
+        .mark_text(align="left", baseline="top", dx=5, dy=5)
+        .encode(x="x:Q", y="y:Q", text="text:N")
+    )
+
     base = alt.Chart(data).encode(
-        x=alt.X("Time:Q", title="Time (s)"),
+        x=alt.X("Time:Q", title="Time (s)", scale=alt.Scale(domain=[x_min, x_max])),
         y=alt.Y("Value:Q", title="Signal Amplitude"),
-        color=alt.Color("Channel:N", scale=alt.Scale(scheme="category10")),
+        color=alt.Color(
+            "Channel:N",
+            scale=alt.Scale(scheme="category10"),
+            legend=alt.Legend(
+                orient="top",  # Place legend at the top
+                columns=3,  # Arrange in 3 columns
+                symbolSize=100,  # Make symbols smaller
+                labelFontSize=10,  # Make labels smaller
+                title=None,  # Remove title
+                padding=5,  # Add some padding
+            ),
+        ),
     )
 
     lines = (
         base.mark_line().encode(opacity=alt.condition(selection, alt.value(1), alt.value(0.2))).add_params(selection)
     )
 
-    return lines.properties(width=700, height=400, title="EEG Signals").interactive()
+    return (lines + scale_text).properties(
+        width=700,
+        height=400,
+        title="EEG Signals",
+        padding={"left": 0, "right": 0, "top": 40, "bottom": 40},  # Increased padding for better alignment
+        autosize=alt.AutoSizeParams(type="fit", contains="padding", resize=True),
+    )
 
 
-def plot_interactive_audio(data: pd.DataFrame) -> alt.Chart:
+def plot_interactive_audio(data: pd.DataFrame, x_min: float = 0.0, x_max: float | None = None) -> alt.Chart:
     """Create an interactive audio waveform chart with Altair"""
+    # Use provided x-axis range or calculate from data
+    if x_max is None:
+        x_max = data["Time"].max()
+
+    # Create a scale indicator
+    scale_text = (
+        alt.Chart(pd.DataFrame({"x": [x_min + 1], "y": [0], "text": ["1s"]}))
+        .mark_text(align="left", baseline="top", dx=5, dy=5)
+        .encode(x="x:Q", y="y:Q", text="text:N")
+    )
+
     chart = (
         alt.Chart(data)
         .mark_line(color="mediumslateblue", opacity=0.6)
-        .encode(x=alt.X("Time:Q", title="Time (s)"), y=alt.Y("Value:Q", title="Amplitude"))
-        .properties(width=700, height=200, title="Audio Waveform")
-        .interactive()
+        .encode(
+            x=alt.X("Time:Q", title="Time (s)", scale=alt.Scale(domain=[x_min, x_max])),
+            y=alt.Y("Value:Q", title="Amplitude"),
+        )
     )
 
-    return chart
+    return (chart + scale_text).properties(width=700, height=200, title="Audio Waveform")
 
 
-def plot_interactive_gaze_movement(data: pd.DataFrame) -> alt.Chart:
+def plot_interactive_gaze_movement(data: pd.DataFrame, x_min: float = 0.0, x_max: float | None = None) -> alt.Chart:
     """Create an interactive gaze movement chart with Altair"""
+    # Use provided x-axis range or calculate from data
+    if x_max is None:
+        x_max = data["Time"].max()
+
+    # all times should be shifted by delta
+    delta = data["Time"].diff().mean()
+    print(">>>", delta)
+    data["Time"] = data["Time"] + delta * 0.5
+
+    time_delta_between_two_records = data["Time"].diff().mean()
+    bar_width = time_delta_between_two_records * 100 * 2
+
+    # Create a scale indicator
+    scale_text = (
+        alt.Chart(pd.DataFrame({"x": [x_min + 1], "y": [0], "text": ["1s"]}))
+        .mark_text(align="left", baseline="top", dx=5, dy=5)
+        .encode(x="x:Q", y="y:Q", text="text:N")
+    )
+
+    # Create the chart with bars
     chart = (
         alt.Chart(data)
-        .mark_bar(color="red", opacity=0.6)
-        .encode(x=alt.X("Time:Q", title="Time (s)"), y=alt.Y("Movement:Q", title="Gaze MI"))
-        .properties(width=700, height=200, title="Gaze Movement Intensity")
-        .interactive()
+        .mark_bar(color="red", opacity=0.6, width=bar_width)
+        .encode(
+            x=alt.X("Time:Q", title="Time (s)", scale=alt.Scale(domain=[x_min, x_max], padding=0)),
+            y=alt.Y("Movement:Q", title="Gaze MI"),
+        )
     )
 
-    return chart
+    return (chart + scale_text).properties(width=700, height=200, title="Gaze Movement Intensity")
 
 
-def plot_interactive_events(data: pd.DataFrame | None) -> Optional[alt.Chart]:
+def plot_interactive_events(
+    data: pd.DataFrame | None, x_min: float = 0.0, x_max: float | None = None
+) -> Optional[alt.Chart]:
     """Create an interactive events chart with Altair showing events as a single timeline"""
     if data is None or data.empty:
         return None
@@ -399,12 +469,23 @@ def plot_interactive_events(data: pd.DataFrame | None) -> Optional[alt.Chart]:
     data = data.copy()
     data["y"] = 0
 
+    # Use provided x-axis range or calculate from data
+    if x_max is None:
+        x_max = data["Time"].max()
+
+    # Create a scale indicator
+    scale_text = (
+        alt.Chart(pd.DataFrame({"x": [x_min + 1], "y": [0], "text": ["1s"]}))
+        .mark_text(align="left", baseline="top", dx=5, dy=5)
+        .encode(x="x:Q", y="y:Q", text="text:N")
+    )
+
     # Create a point chart for events on a single line
     chart = (
         alt.Chart(data)
         .mark_circle(size=80)
         .encode(
-            x=alt.X("Time:Q", title="Time (s)"),
+            x=alt.X("Time:Q", title="Time (s)", scale=alt.Scale(domain=[x_min, x_max])),
             y=alt.Y("y:Q", title=None, axis=None),  # Fixed position on a single line
             color=alt.Color("Event:N", scale=alt.Scale(scheme="category10")),
             tooltip=["Time:Q", "Event:N"],
@@ -420,6 +501,6 @@ def plot_interactive_events(data: pd.DataFrame | None) -> Optional[alt.Chart]:
     event_labels = chart.mark_text(align="center", baseline="bottom", dy=-10, fontSize=10).encode(text="Event:N")
 
     # Combine the visualizations
-    combined = (timeline + chart + event_labels).properties(width=700, height=100, title="Event Timeline").interactive()
+    combined = (timeline + chart + event_labels + scale_text).properties(width=700, height=100, title="Event Timeline")
 
     return combined
