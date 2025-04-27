@@ -4,10 +4,10 @@ version = "0.1.0"
 description = ""
 authors = ["Karel Vlk <=>"]
 readme = "README.md"
+package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.11"
-braindecode = "^0.8.1"
 matplotlib = "^3.10.1"
 streamlit = "^1.44.1"
 pydub = "^0.25.1"
