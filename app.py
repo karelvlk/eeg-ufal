@@ -3,7 +3,7 @@ import streamlit as st
 import src.processor as processor
 import pandas as pd
 from src.file_loader import GithubFileLoader, FileLoader
-import plotly.graph_objects as go
+from analysis.qana import is_eeg_record_valid
 
 # Set page configuration
 st.set_page_config(page_title="EEG Data Browser", layout="wide")
@@ -86,6 +86,7 @@ def process_and_plot_data_cached(
     bandpass=(1.0, 50.0),
     notch_filter=True,
     out_file=None,
+    eeg_validity=None,
 ):
     return processor.create_interactive_plot(
         file_name,
@@ -98,6 +99,7 @@ def process_and_plot_data_cached(
         bandpass=bandpass,
         notch_filter=notch_filter,
         out_file=out_file,
+        eeg_validity=eeg_validity,
     )
 
 
@@ -241,13 +243,26 @@ def main():
         st.warning("No EEG data found")
         return
 
+    # Check EEG validity
+    eeg_validity = is_eeg_record_valid(eeg_df)
+    overall_validity = all(result[0] for result in eeg_validity.values())
+
     # File information badges
     badge_category = current_data_unit["category"]
     badge_participant_id = current_data_unit["participant_id"]
     badge_sentence_id = current_data_unit["sentence_id"]
+    validity_color = "green" if overall_validity else "red"
+    validity_status = "Valid" if overall_validity else "Invalid"
+
     st.markdown(
-        f":violet-badge[Category: {badge_category}] :orange-badge[Participant: {badge_participant_id}] :blue-badge[Sentence: {badge_sentence_id}]"
+        f":violet-badge[Category: {badge_category}] :orange-badge[Participant: {badge_participant_id}] :blue-badge[Sentence: {badge_sentence_id}] :{validity_color}-badge[EEG: {validity_status}]"
     )
+
+    # Display detailed validity information
+    with st.expander("EEG Validity Details"):
+        for channel, (is_valid, reason) in eeg_validity.items():
+            status_color = "green" if is_valid else "red"
+            st.markdown(f":{status_color}[{channel}: {'Valid' if is_valid else 'Invalid'} - {reason}]")
 
     # Column selection for plotting
     st.sidebar.subheader("Plot Settings")
@@ -329,6 +344,7 @@ def main():
         st.session_state.gaze_window_size / 1000.0,  # Convert ms to seconds
         (start_idx, end_idx),
         ica=st.session_state.use_ica,
+        eeg_validity=eeg_validity,
     )
 
     if isinstance(figures, tuple):
@@ -391,6 +407,7 @@ def main():
             bandpass=None,
             notch_filter=None,
             out_file=None,
+            eeg_validity=eeg_validity,
         )
 
         if st.session_state.compare_raw_next_to_each_other:

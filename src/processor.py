@@ -1,4 +1,3 @@
-import os
 import io
 import logging
 import pandas as pd
@@ -7,10 +6,10 @@ import librosa
 import librosa.display
 import numpy as np
 import streamlit as st
-import seaborn as sns
+import seaborn as sns  # type: ignore
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
-from typing import Any, List, Dict, Literal
+from plotly.subplots import make_subplots  # type: ignore
+from typing import Any, List, Dict, Literal, cast
 from src.data_preprocessing import preprocess_raw_data
 
 
@@ -253,6 +252,8 @@ def create_interactive_plot(
     gaze_df: pd.DataFrame | None,
     gaze_window_size: float = 0.1,  # in seconds
     cols: tuple[int, int] = (21, 25),
+    *,
+    eeg_validity: dict | None = None,
     **kwargs,
 ) -> tuple[go.Figure, go.Figure | None]:
     """
@@ -264,6 +265,7 @@ def create_interactive_plot(
         gaze_df: DataFrame containing gaze data
         gaze_window_size: Size of the time window for gaze intensity sampling in seconds
         cols: Tuple of column indices to use for EEG data
+        eeg_validity: Dictionary with EEG channel validity information {channel_name: (is_valid, reason)}
         **kwargs: Additional arguments passed to preprocess_raw_data
     Returns:
         Tuple of Plotly Figure objects (main plot and heatmap)
@@ -366,6 +368,23 @@ def create_interactive_plot(
     eeg_max = 0
     eeg_range = 0
 
+    # Define EEG channel colors based on validity
+    # Default colors for channels
+    eeg_colors = {
+        "RAW_TP9": "blue",
+        "RAW_AF7": "orange",
+        "RAW_AF8": "green",
+        "RAW_TP10": "red",
+    }
+
+    # Gray colors for invalid channels
+    invalid_colors = {
+        "RAW_TP9": "gray",
+        "RAW_AF7": "dimgray",
+        "RAW_AF8": "darkgray",
+        "RAW_TP10": "slategray",
+    }
+
     if eeg_df is not None and len(eeg_df) > 1:
         mne_raw = preprocess_raw_data(eeg_df, cols, **kwargs)
         if mne_raw is not None:
@@ -381,13 +400,26 @@ def create_interactive_plot(
 
             # Plot EEG data
             for col in eeg_columns:
+                # Determine if channel is valid
+                is_valid = True
+                validity_reason = "No validity check performed"
+
+                if eeg_validity and col in eeg_validity:
+                    is_valid, validity_reason = eeg_validity[col]
+
+                # Choose color based on validity
+                color = eeg_colors.get(col, "black") if is_valid else invalid_colors.get(col, "gray")
+
                 main_fig.add_trace(
                     go.Scatter(
                         x=time,
                         y=data[eeg_columns.index(col)],
-                        name=col,
+                        name=f"{col} ({'Valid' if is_valid else 'Invalid'})",
                         mode="lines",
+                        line=dict(color=color),
                         visible="legendonly" if len(eeg_columns) > 5 else True,
+                        hovertemplate=f"%{{y:.2f}}<br>%{{text}}<extra></extra>",
+                        text=[f"{col}: {validity_reason}" for _ in range(len(time))],
                     ),
                     row=1,
                     col=1,
@@ -569,7 +601,7 @@ def create_interactive_plot(
 
             def create_kde_plot(x, y, colorscale, name):
                 # Calculate KDE using scipy
-                from scipy.stats import gaussian_kde
+                from scipy.stats import gaussian_kde  # type: ignore
 
                 values = np.vstack([x, y])
                 kernel = gaussian_kde(values)
@@ -701,7 +733,7 @@ def compute_correlations(
     gaze_window_size: float | None = None,
     gaze_col: str | None = None,
     resample_ms: int | None = 100,
-    method: str = "pearson",
+    method: Literal["pearson", "kendall", "spearman"] = "pearson",
 ) -> Dict[str, float]:
     if eeg_chans is None:
         eeg_chans = ["RAW_TP9", "RAW_AF7", "RAW_AF8", "RAW_TP10"]
@@ -741,13 +773,15 @@ def compute_correlations(
     merged = pd.concat([eeg_r, audio_r, gaze_r], axis=1).dropna()
     merged["EEG_mean"] = merged[eeg_chans].mean(axis=1)
 
+    correlation_method = cast(Literal["pearson", "kendall", "spearman"], method)
+
     corr = {
-        "4ch_audio": float(merged["EEG_mean"].corr(merged["AUDIO"], method=method)),
-        "4ch_gaze": float(merged["EEG_mean"].corr(merged["GAZE"], method=method)),
+        "4ch_audio": float(merged["EEG_mean"].corr(merged["AUDIO"], method=correlation_method)),
+        "4ch_gaze": float(merged["EEG_mean"].corr(merged["GAZE"], method=correlation_method)),
     }
     for ch in eeg_chans:
-        corr[f"{ch}_audio"] = float(merged[ch].corr(merged["AUDIO"], method=method))
-        corr[f"{ch}_gaze"] = float(merged[ch].corr(merged["GAZE"], method=method))
+        corr[f"{ch}_audio"] = float(merged[ch].corr(merged["AUDIO"], method=correlation_method))
+        corr[f"{ch}_gaze"] = float(merged[ch].corr(merged["GAZE"], method=correlation_method))
 
     return corr
 
@@ -786,7 +820,6 @@ def create_correlation_plot(corr_dict: Dict[str, float]) -> go.Figure:
     fig.update_layout(
         height=600,
         showlegend=False,
-        title_text="EEG Correlations with Audio and Gaze",
     )
 
     # Add y-axis range from -1 to 1 for correlation values
