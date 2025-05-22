@@ -75,11 +75,13 @@ class FileLoader:
                 # Extract IDs
                 participant_id = self.extract_participant_id(basename)
                 sentence_id = self.extract_sentence_id(basename)
+                order = self.extract_order(basename)
 
                 self.eeg_files[category][basename] = {
                     "path": path,
                     "participant_id": participant_id,
                     "sentence_id": sentence_id,
+                    "order": order,
                     "category": category,
                 }
 
@@ -132,11 +134,18 @@ class FileLoader:
         match = re.search(r"S\d+", filename)
         return match.group(0) if match else None
 
+    def extract_order(self, filename: str) -> str | None:
+        """Extract order (P<participant_id>-<order_of_presentation>-S<sentence_id>) from filename."""
+        # i want to extract the order_of_presentation
+        match = re.search(r"-(\d+)-", filename)
+        return match.group(1) if match else None
+
     def get_data_files(
         self,
         category_filter: Literal["Read", "See", "Update", "Translate", "All"] = "All",
         participant_id_filter: str | None = None,
         sentence_id_filter: str | None = None,
+        sort_by: Literal["participant_id", "sentence_id"] | None = None,
     ):
         """
         Get data files that match the participant_id and sentence_id filters.
@@ -173,6 +182,7 @@ class FileLoader:
                     "name": basename,
                     "participant_id": eeg_info["participant_id"],
                     "sentence_id": eeg_info["sentence_id"],
+                    "order": eeg_info["order"],
                     "category": category,
                     "eeg": os.path.join(
                         self.base_path, "contents" if self.loader_type == LoaderType.GITHUB else "", eeg_info["path"]
@@ -190,6 +200,11 @@ class FileLoader:
                 }
 
                 data_units.append(data_unit)
+
+        if sort_by == "participant_id":
+            data_units.sort(key=lambda x: (x[sort_by], x["order"]))
+        elif sort_by is not None:
+            data_units.sort(key=lambda x: x[sort_by])
 
         return data_units
 
@@ -272,6 +287,7 @@ class GithubFileLoader(FileLoader):
         category_filter: Literal["Read", "See", "Update", "Translate", "All"] = "All",
         participant_id_filter: str | None = None,
         sentence_id_filter: str | None = None,
+        sort_by: Literal["participant_id", "sentence_id"] | None = None,
     ):
         """
         Get data files that match the participant_id and sentence_id filters.
@@ -308,6 +324,7 @@ class GithubFileLoader(FileLoader):
                     "name": basename,
                     "participant_id": eeg_info["participant_id"],
                     "sentence_id": eeg_info["sentence_id"],
+                    "order": eeg_info["order"],
                     "category": category,
                     "eeg": f"{_self.raw_base_url}/{eeg_info['path']}",
                     "gaze": f"{_self.raw_base_url}/{gaze_path}" if gaze_path else None,

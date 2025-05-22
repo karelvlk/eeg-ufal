@@ -101,6 +101,26 @@ def process_and_plot_data_cached(
     )
 
 
+@st.cache_data
+def compute_correlations_cached(
+    eeg_df,
+    gaze_df,
+    audio_io,
+    gaze_window_size=0.1,
+    correlation_method="pearson",
+    resample_ms=100,
+):
+    """Cached wrapper for correlation computation"""
+    return processor.compute_correlations(
+        eeg_df=eeg_df,
+        raw_gaze_df=gaze_df,
+        audio_like=audio_io,
+        gaze_window_size=gaze_window_size,
+        method=correlation_method,
+        resample_ms=resample_ms,
+    )
+
+
 # Main app function
 def main():
     st.title("EEG Data Browser")
@@ -116,6 +136,12 @@ def main():
         st.session_state.participant_filter = "All"
     if "sentence_filter" not in st.session_state:
         st.session_state.sentence_filter = "All"
+    if "show_correlation_analysis" not in st.session_state:
+        st.session_state.show_correlation_analysis = False
+    if "correlation_method" not in st.session_state:
+        st.session_state.correlation_method = "pearson"
+    if "correlation_resample_ms" not in st.session_state:
+        st.session_state.correlation_resample_ms = 100
 
     # Callback functions to update filters
     def on_participant_change():
@@ -260,6 +286,30 @@ def main():
         help="Size of the time window for gaze intensity sampling in milliseconds",
     )
 
+    # Add Correlation Analysis section to sidebar
+    st.sidebar.subheader("Correlation Analysis")
+    st.session_state.show_correlation_analysis = st.sidebar.checkbox(
+        "Show Correlation Analysis", value=st.session_state.show_correlation_analysis, key="show_corr_analysis_cb"
+    )
+
+    correlation_methods = ["pearson", "kendall", "spearman"]
+    st.session_state.correlation_method = st.sidebar.selectbox(
+        "Correlation Method",
+        correlation_methods,
+        index=correlation_methods.index(st.session_state.correlation_method),
+        disabled=not st.session_state.show_correlation_analysis,
+    )
+
+    st.session_state.correlation_resample_ms = st.sidebar.slider(
+        "Resampling (ms)",
+        min_value=10,
+        max_value=500,
+        value=st.session_state.correlation_resample_ms,
+        step=10,
+        disabled=not st.session_state.show_correlation_analysis,
+        help="Temporal resolution for correlation analysis. Lower values give higher precision but take longer to compute.",
+    )
+
     # Read CSV to get column names
     all_columns = list(eeg_df.columns)
 
@@ -288,6 +338,46 @@ def main():
             st.plotly_chart(heatmap_fig, use_container_width=True)
     else:
         st.plotly_chart(figures, use_container_width=True)
+
+    # Add correlation analysis section if enabled
+    if st.session_state.show_correlation_analysis:
+        st.subheader("Correlation Analysis")
+
+        # Check if we have all necessary data for correlation analysis
+        if eeg_df is not None and gaze_df is not None and audio_io is not None:
+            try:
+                with st.spinner("Computing correlations..."):
+                    correlations = compute_correlations_cached(
+                        eeg_df=eeg_df,
+                        gaze_df=gaze_df,
+                        audio_io=audio_io,
+                        gaze_window_size=st.session_state.gaze_window_size / 1000.0,  # Convert ms to seconds
+                        correlation_method=st.session_state.correlation_method,
+                        resample_ms=st.session_state.correlation_resample_ms,
+                    )
+
+                    # Display correlation plot
+                    corr_fig = processor.create_correlation_plot(correlations)
+                    st.plotly_chart(corr_fig, use_container_width=True)
+
+                    # Display correlation values as a table
+                    st.subheader("Correlation Values")
+                    corr_df = pd.DataFrame(list(correlations.items()), columns=["Measurement", "Correlation"])
+                    corr_df = corr_df.sort_values(by="Correlation", ascending=False)
+                    st.dataframe(corr_df, use_container_width=True)
+
+            except Exception as e:
+                st.error(f"Error computing correlations: {str(e)}")
+                st.exception(e)
+        else:
+            missing_data = []
+            if eeg_df is None:
+                missing_data.append("EEG data")
+            if gaze_df is None:
+                missing_data.append("Gaze data")
+            if audio_io is None:
+                missing_data.append("Audio data")
+            st.warning(f"Cannot perform correlation analysis. Missing data: {', '.join(missing_data)}")
 
     if st.session_state.compare_raw:
         raw_figures = process_and_plot_data_cached(

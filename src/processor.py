@@ -10,6 +10,7 @@ import streamlit as st
 import seaborn as sns
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from typing import Any, List, Dict, Literal
 from src.data_preprocessing import preprocess_raw_data
 
 
@@ -634,3 +635,187 @@ def create_interactive_plot(
             logging.warning(f"Failed to create gaze heatmap: {e}")
 
     return main_fig, heatmap_fig
+
+
+# ------------------------------------------------------------
+# Correlation analysis functions from qana.py
+# ------------------------------------------------------------
+def _audio_to_dataframe(audio_like: Any, *, target_sr: int | None = 1000, col_name: str = "Amplitude") -> pd.DataFrame:
+    if isinstance(audio_like, pd.DataFrame):
+        data_cols = audio_like.columns.difference(["TimeStamp"]).tolist()
+        return audio_like.rename(columns={data_cols[0]: col_name}).copy()
+
+    if isinstance(audio_like, tuple) and len(audio_like) == 2:
+        samples, sr = audio_like
+    else:
+        if isinstance(audio_like, (io.IOBase, io.BytesIO)):
+            audio_like.seek(0)
+        samples, sr = librosa.load(audio_like, sr=None, mono=True)
+
+    if target_sr and sr != target_sr:
+        samples = librosa.resample(samples, orig_sr=sr, target_sr=target_sr)
+        sr = target_sr
+
+    # ----- relative timeline (Timedelta index) ---------------------------
+    ts = pd.to_timedelta(np.arange(len(samples)) / sr, unit="s")
+    return pd.DataFrame({"TimeStamp": ts, col_name: samples})
+
+
+def _gaze_to_dataframe(
+    gaze_df: pd.DataFrame, *, window_size: float | None = None, intensity_col: str = "Gaze_Intensity"
+) -> pd.DataFrame:
+    g = gaze_df.copy()
+    g["X"] = pd.to_numeric(g["X"], errors="coerce")
+    g["Y"] = pd.to_numeric(g["Y"], errors="coerce")
+    g["TimeDT"] = pd.to_datetime(g["TimeStamp"], format="%H:%M:%S.%f", errors="coerce")
+    g = g.dropna(subset=["TimeDT", "X", "Y"]).sort_values("TimeDT")
+
+    # ---------- NEW: if nothing left, return empty shell -----------------
+    if g.empty:
+        return pd.DataFrame(columns=["TimeStamp", intensity_col])
+
+    # ---------- movement & intensity ------------------------------------
+    g["dX"] = g["X"].diff().abs()
+    g["dY"] = g["Y"].diff().abs()
+    g["intensity"] = g["dX"] + g["dY"]
+
+    if window_size:
+        g["elapsed"] = (g["TimeDT"] - g["TimeDT"].iloc[0]).dt.total_seconds()
+        g["bin"] = np.floor(g["elapsed"] / window_size).astype(int)
+        grp = g.groupby("bin")["intensity"].sum()
+        max_delta = grp.max() or 1
+        grp = grp / max_delta
+        ts = pd.to_timedelta(grp.index * window_size, unit="s")
+        return pd.DataFrame({"TimeStamp": ts, intensity_col: grp.values})
+
+    ts = g["TimeDT"] - g["TimeDT"].iloc[0]  # relative timeline
+    return pd.DataFrame({"TimeStamp": ts, intensity_col: g["intensity"].values})
+
+
+def compute_correlations(
+    eeg_df: pd.DataFrame,
+    raw_gaze_df: pd.DataFrame,
+    audio_like: Any,
+    *,
+    eeg_chans: List[str] | None = None,
+    gaze_window_size: float | None = None,
+    gaze_col: str | None = None,
+    resample_ms: int | None = 100,
+    method: str = "pearson",
+) -> Dict[str, float]:
+    if eeg_chans is None:
+        eeg_chans = ["RAW_TP9", "RAW_AF7", "RAW_AF8", "RAW_TP10"]
+
+    if gaze_col is None:
+        gaze_df = _gaze_to_dataframe(raw_gaze_df, window_size=gaze_window_size)
+        gaze_col = "Gaze_Intensity"
+    else:
+        gaze_df = raw_gaze_df
+
+    # ---------------- relative index helper ------------------------------
+    def _prep(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
+        # empty guard
+        if df.empty:
+            return pd.DataFrame(columns=cols)
+
+        d = df.copy()
+        ts = d["TimeStamp"]
+
+        # if not already a TimedeltaIndex, convert and make relative
+        if not pd.api.types.is_timedelta64_dtype(ts.dtype):
+            ts = pd.to_datetime(ts)  # parse wall‐clock times
+            ts = ts - ts.iloc[0]  # make relative
+        # else: ts is already a TimedeltaIndex
+
+        d = d.set_index(ts)[cols]
+
+        if resample_ms is not None:
+            d = d.resample(f"{resample_ms}ms").mean()
+
+        return d
+
+    eeg_r = _prep(eeg_df, eeg_chans)
+    audio_r = _prep(_audio_to_dataframe(audio_like, col_name="AUDIO"), ["AUDIO"])
+    gaze_r = _prep(gaze_df, [gaze_col]).rename(columns={gaze_col: "GAZE"})
+
+    merged = pd.concat([eeg_r, audio_r, gaze_r], axis=1).dropna()
+    merged["EEG_mean"] = merged[eeg_chans].mean(axis=1)
+
+    corr = {
+        "4ch_audio": float(merged["EEG_mean"].corr(merged["AUDIO"], method=method)),
+        "4ch_gaze": float(merged["EEG_mean"].corr(merged["GAZE"], method=method)),
+    }
+    for ch in eeg_chans:
+        corr[f"{ch}_audio"] = float(merged[ch].corr(merged["AUDIO"], method=method))
+        corr[f"{ch}_gaze"] = float(merged[ch].corr(merged["GAZE"], method=method))
+
+    return corr
+
+
+def create_correlation_plot(corr_dict: Dict[str, float]) -> go.Figure:
+    """Create a bar chart visualization of the correlation values"""
+    # Separate audio and gaze correlations
+    audio_corrs = {k: v for k, v in corr_dict.items() if k.endswith("_audio")}
+    gaze_corrs = {k: v for k, v in corr_dict.items() if k.endswith("_gaze")}
+
+    # Create a figure with two subplots
+    fig = make_subplots(
+        rows=2, cols=1, subplot_titles=("EEG - Audio Correlations", "EEG - Gaze Correlations"), vertical_spacing=0.2
+    )
+
+    # Add audio correlation bars
+    fig.add_trace(
+        go.Bar(
+            x=list(audio_corrs.keys()),
+            y=list(audio_corrs.values()),
+            name="Audio Correlation",
+            marker_color="mediumslateblue",
+        ),
+        row=1,
+        col=1,
+    )
+
+    # Add gaze correlation bars
+    fig.add_trace(
+        go.Bar(x=list(gaze_corrs.keys()), y=list(gaze_corrs.values()), name="Gaze Correlation", marker_color="tomato"),
+        row=2,
+        col=1,
+    )
+
+    # Update layout
+    fig.update_layout(
+        height=600,
+        showlegend=False,
+        title_text="EEG Correlations with Audio and Gaze",
+    )
+
+    # Add y-axis range from -1 to 1 for correlation values
+    fig.update_yaxes(range=[-1, 1], title_text="Correlation (Pearson)", row=1, col=1)
+    fig.update_yaxes(range=[-1, 1], title_text="Correlation (Pearson)", row=2, col=1)
+
+    # Add a horizontal line at y=0
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", row=1, col=1)
+    fig.add_hline(y=0, line_dash="dash", line_color="gray", row=2, col=1)
+
+    # Clean up x-axis labels
+    fig.update_xaxes(
+        title_text="",
+        row=2,
+        col=1,
+        tickangle=45,
+        tickmode="array",
+        tickvals=list(gaze_corrs.keys()),
+        ticktext=[k.replace("_gaze", "") for k in gaze_corrs.keys()],
+    )
+
+    fig.update_xaxes(
+        title_text="",
+        row=1,
+        col=1,
+        tickangle=45,
+        tickmode="array",
+        tickvals=list(audio_corrs.keys()),
+        ticktext=[k.replace("_audio", "") for k in audio_corrs.keys()],
+    )
+
+    return fig
