@@ -2,8 +2,9 @@ import os
 import streamlit as st
 import src.processor as processor
 import pandas as pd
+import matplotlib.pyplot as plt
 from src.file_loader import GithubFileLoader, FileLoader
-from analysis.qana import is_eeg_record_valid
+from analysis.qana import is_eeg_record_valid, participant_sequences
 
 # Set page configuration
 st.set_page_config(page_title="EEG Data Browser", layout="wide")
@@ -123,15 +124,111 @@ def compute_correlations_cached(
     )
 
 
+@st.cache_data
+def get_all_participant_ids():
+    """Get a list of all available participant IDs"""
+    return sorted(loader.get_valid_participant_ids("Read"))
+
+
+@st.cache_data
+def plot_participant_sequences(participant_id):
+    """Cached wrapper for plotting all 32 sequences for a participant"""
+    try:
+        # Create a figure with 32 rows (one for each sequence) and 4 columns (Read, Translate, See, Update)
+        fig, axes = plt.subplots(32, 4, figsize=(20, 2 * 32 + 2), sharey="row", constrained_layout=True)
+        plt.subplots_adjust(hspace=0.6)
+        col_labels = ["Read", "Translate", "See", "Update"]
+
+        # Get sequences for this participant
+        seq_iter = sorted(participant_sequences(loader, participant_id), key=lambda x: x[-1])
+
+        for row_idx, (rd, td, sd, ud, order) in enumerate(seq_iter):
+            for col_idx, (eeg_df, label) in enumerate(zip([rd[0], td[0], sd[0], ud[0]], col_labels)):
+                ax = axes[row_idx, col_idx]
+
+                # Skip if data is missing
+                if eeg_df is None:
+                    ax.text(0.5, 0.5, "No data", ha="center", va="center")
+                    continue
+
+                # Check validity and plot
+                results = is_eeg_record_valid(eeg_df)
+                eeg_df["TimeStamp"] = pd.to_datetime(eeg_df["TimeStamp"], format="%H:%M:%S.%f")
+
+                for ch, ch_label in zip(
+                    ["RAW_TP9", "RAW_AF7", "RAW_AF8", "RAW_TP10"],
+                    ["TP9", "AF7", "AF8", "TP10"],
+                ):
+                    ok, reason = results[ch]
+                    color = (
+                        "tab:blue"
+                        if ch == "RAW_TP9"
+                        else "tab:orange"
+                        if ch == "RAW_AF7"
+                        else "tab:green"
+                        if ch == "RAW_AF8"
+                        else "tab:red"
+                    )
+                    color = color if ok else "gray"
+                    ax.plot(eeg_df["TimeStamp"], eeg_df[ch], color, label=ch_label)
+
+                # Add titles and labels
+                if row_idx == 0:
+                    ax.set_title(label)
+                if col_idx == 0:
+                    ax.set_ylabel(f"order {order}")
+                if row_idx == 31:  # last row
+                    ax.set_xlabel("Time")
+                ax.grid(True)
+
+                # Format x-axis to show only HH:MM:SS
+                ax.xaxis.set_major_formatter(plt.matplotlib.dates.DateFormatter("%H:%M:%S"))
+                plt.setp(ax.xaxis.get_majorticklabels(), rotation=45)
+
+        # Add legend only once
+        handles, labels = axes[0, 0].get_legend_handles_labels()
+        fig.legend(
+            handles,
+            labels,
+            loc="upper center",
+            bbox_to_anchor=(0.5, 1.00),
+            ncol=4,
+            frameon=False,
+        )
+
+        # Add title
+        fig.suptitle(
+            f"EEG – participant {participant_id}",
+            y=0.97,
+            fontsize=18,
+        )
+
+        return fig
+    except Exception as e:
+        st.error(f"Error generating plot for participant {participant_id}: {str(e)}")
+        return None
+
+
 # Main app function
 def main():
     st.title("EEG Data Browser")
 
+    # Create tabs for different views
+    tab1, tab2 = st.tabs(["Single File View", "Participant Sequences"])
+
+    with tab1:
+        show_single_file_view()
+
+    with tab2:
+        show_participant_sequences_view()
+
+
+def show_single_file_view():
     # Sidebar for controls
-    st.sidebar.header("Controls")
+    st.sidebar.header("Single File Controls")
 
     # Category selection
-    selected_category = st.sidebar.selectbox("Select Category", loader.get_categories())
+    selected_category = st.sidebar.selectbox("Select Category", loader.get_categories(), key="single_category")
 
     # Initialize filter in session state if not present
     if "participant_filter" not in st.session_state:
@@ -451,6 +548,66 @@ def main():
 
     # Add info about number of files
     st.sidebar.info(f"{len(all_files)} files match your filters")
+
+
+def show_participant_sequences_view():
+    # Initialize the current participant index in session state if not present
+    if "current_participant_idx" not in st.session_state:
+        st.session_state.current_participant_idx = 0
+
+    # Get all participant IDs
+    all_participant_ids = get_all_participant_ids()
+
+    if not all_participant_ids:
+        st.warning("No participant data found.")
+        return
+
+    # Navigation controls
+    nav_container = st.container()
+    nav_col1, nav_col2, nav_col3 = nav_container.columns([1, 2, 1])
+
+    # Select participant dropdown
+    with nav_col2:
+        selected_participant_idx = st.selectbox(
+            "Select Participant",
+            range(len(all_participant_ids)),
+            format_func=lambda i: all_participant_ids[i],
+            index=st.session_state.current_participant_idx,
+            key="participant_selector",
+            label_visibility="collapsed",
+        )
+
+        if selected_participant_idx != st.session_state.current_participant_idx:
+            st.session_state.current_participant_idx = selected_participant_idx
+            st.rerun()
+
+    # Navigation buttons
+    with nav_col1:
+        if st.button("← Previous", key="prev_participant", use_container_width=True):
+            st.session_state.current_participant_idx = (st.session_state.current_participant_idx - 1) % len(
+                all_participant_ids
+            )
+            st.rerun()
+
+    with nav_col3:
+        if st.button("Next →", key="next_participant", use_container_width=True):
+            st.session_state.current_participant_idx = (st.session_state.current_participant_idx + 1) % len(
+                all_participant_ids
+            )
+            st.rerun()
+
+    # Get current participant ID
+    current_participant_id = all_participant_ids[st.session_state.current_participant_idx]
+
+    # Display a loading spinner while generating the plot
+    with st.spinner(f"Generating sequence plot for participant {current_participant_id}..."):
+        # Plot the participant's sequences
+        fig = plot_participant_sequences(current_participant_id)
+
+        if fig:
+            st.pyplot(fig, use_container_width=True)
+        else:
+            st.error(f"Failed to generate plot for participant {current_participant_id}")
 
 
 if __name__ == "__main__":

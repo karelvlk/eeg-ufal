@@ -2,7 +2,7 @@
 #  AUDIO / GAZE helpers  (unchanged API, new **relative** time axis)
 # ------------------------------------------------------------
 import io, librosa, numpy as np, pandas as pd
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Literal
 
 
 def _audio_to_dataframe(audio_like: Any, *, target_sr: int | None = 1000, col_name: str = "Amplitude") -> pd.DataFrame:
@@ -72,7 +72,7 @@ def compute_correlations(
     gaze_window_size: float | None = None,
     gaze_col: str | None = None,
     resample_ms: int | None = 100,
-    method: str = "pearson",
+    method: Literal["pearson", "kendall", "spearman"] = "pearson",
 ) -> Dict[str, float]:
     if eeg_chans is None:
         eeg_chans = ["RAW_TP9", "RAW_AF7", "RAW_AF8", "RAW_TP10"]
@@ -325,7 +325,7 @@ def plot_participant_eeg(participant_id: str, base_path: str = "../ufal_emmt"):
         frameon=False,
     )
     fig.suptitle(
-        f"EEG – participant {participant_id}",
+        "",
         y=0.97,  # inside the figure now
         fontsize=18,
     )
