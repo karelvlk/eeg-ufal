@@ -90,6 +90,9 @@ def process_and_plot_data(
     audio_color = "mediumslateblue"
     gaze_color = "red"
 
+    eeg_range = None
+    eeg_columns: list[str] | None = None
+
     if eeg_df is not None and len(eeg_df) > 1:
         mne_raw = preprocess_raw_data(eeg_df, cols, **kwargs)
         if mne_raw is not None:
@@ -97,6 +100,7 @@ def process_and_plot_data(
             data = mne_raw.get_data()  # Get the EEG data
             time = mne_raw.times  # Get the time vector
             eeg_columns = mne_raw.ch_names  # Get the channel names
+            eeg_range = np.max(data) - np.min(data)
 
             # Create a DataFrame
             df = pd.DataFrame(data.T, columns=eeg_columns)  # Transpose to have channels as columns
@@ -114,12 +118,18 @@ def process_and_plot_data(
             y, sr = librosa.load(audio_io)
             audio_time = np.linspace(0, len(y) / sr, len(y))
 
-            if eeg_df is not None:
-                # Normalize audio to match EEG scale
-                y_normalized = y * (np.max(eeg_df[eeg_columns].values) - np.min(eeg_df[eeg_columns].values)) / 2
-                ax.plot(audio_time, y_normalized + audio_offset, color=audio_color, alpha=0.3, label="Audio")
+            if eeg_df is not None and eeg_range is not None:
+                # Normalize audio to roughly match EEG amplitude range
+                y_normalized = y * (eeg_range / 2)
+                ax.plot(
+                    audio_time,
+                    y_normalized + audio_offset,
+                    color=audio_color,
+                    alpha=0.3,
+                    label="Audio",
+                )
             else:
-                # Plot raw audio
+                # Plot raw audio when EEG reference is not available
                 ax.plot(audio_time, y + audio_offset, color=audio_color, alpha=0.3, label="Audio")
         except Exception as e:
             logging.warning(f"Failed to load audio file and process it: {e}")
