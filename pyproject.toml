@@ -1,24 +1,31 @@
 [tool.poetry]
 name = "eeg-ufal"
-version = "0.1.0"
-description = ""
+version = "0.2.0"
+description = "EEG data browser and EEG-to-Text generation for the UFAL EMMT dataset"
 authors = ["Karel Vlk <=>"]
 readme = "README.md"
 package-mode = false
 
 [tool.poetry.dependencies]
 python = "^3.11"
+# ── Original dependencies ──────────────────────────────────────────────────
 matplotlib = "^3.10.1"
-streamlit = "^1.44.1"
-pydub = "^0.25.1"
-scipy = "^1.15.2"
-numpy = "^2.2.4"
-seaborn = "^0.13.2"
-librosa = "^0.11.0"
-requests = "^2.32.3"
-mne = "^1.9.0"
-plotly = "^6.0.1"
-
+streamlit   = "^1.44.1"
+pydub       = "^0.25.1"
+scipy       = "^1.15.2"
+numpy       = "^2.2.4"
+seaborn     = "^0.13.2"
+librosa     = "^0.11.0"
+requests    = "^2.32.3"
+mne         = "^1.9.0"
+plotly      = "^6.0.1"
+# ── EEG2Text additions ─────────────────────────────────────────────────────
+torch             = ">=2.0.0"
+transformers      = ">=4.30.0"
+huggingface-hub   = ">=0.16.0"
+datasets          = ">=2.14.0"
+scikit-learn      = ">=1.2.0"
+pandas            = ">=2.0.0"
 
 [tool.poetry.group.dev.dependencies]
 ipykernel = "^6.29.5"

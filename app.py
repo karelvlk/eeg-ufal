@@ -12,8 +12,8 @@ st.set_page_config(page_title="EEG Data Browser", layout="wide")
 # Singleton implementation for loader
 @st.cache_resource
 def get_loader():
-    file_loader_type = os.getenv("FILE_LOADER_TYPE")
-    data_path = os.getenv("DATA_PATH")
+    file_loader_type = os.getenv("FILE_LOADER_TYPE", "local")
+    data_path = os.getenv("DATA_PATH", "./ufal_emmt")
     print(f"file_loader_type: {file_loader_type}")
     print(f"data_path: {data_path}")
     if file_loader_type == "local":
@@ -29,16 +29,7 @@ loader = get_loader()
 
 
 @st.cache_data
-def create_files_dataframe(data_units: list[dict]):
-    """
-    Create a dataframe with information about all files that match the current filters.
-
-    Args:
-        files: List of Path objects representing CSV files
-
-    Returns:
-        DataFrame with columns: Filename, Category, Participant, Sentence
-    """
+def create_files_dataframe(data_units: list):
     data = []
     for du in data_units:
         data.append(
@@ -49,7 +40,6 @@ def create_files_dataframe(data_units: list[dict]):
                 "Sentence": du["sentence_id"],
             }
         )
-
     return pd.DataFrame(data)
 
 
@@ -101,9 +91,136 @@ def process_and_plot_data_cached(
     )
 
 
+# ---------------------------------------------------------------------------
+# EEG-to-Text page
+# ---------------------------------------------------------------------------
+
+def render_eeg2text():
+    try:
+        from src.eeg2text_page import render_eeg2text_page
+    except ImportError as exc:
+        st.error(f"EEG2Text module could not be imported: {exc}")
+        return
+
+    import numpy as np
+
+    HF_DATASET_ID = "sajjad5221/eeg2text-emmt-dataset"
+
+    @st.cache_resource(show_spinner="Loading dataset from HuggingFace...")
+    def _load_hf_dataset():
+        from datasets import load_dataset
+        return load_dataset(HF_DATASET_ID)
+
+    hf_dataset = _load_hf_dataset()
+
+    st.sidebar.success(
+        "Dataset loaded: "
+        + "  |  ".join(f"{s}: {len(hf_dataset[s])}" for s in hf_dataset.keys())
+    )
+
+    @st.cache_resource(show_spinner="Indexing sentences...")
+    def _build_index(_ds):
+        sid_index = {}
+        sid_text = {}
+        for split in _ds.keys():
+            for idx, sample in enumerate(_ds[split]):
+                sid = str(sample.get("sentence_id", "")).strip().upper()
+                pid = str(sample.get("participant_id", "")).strip().upper()
+                txt = str(sample.get("sentence_text", "")).strip()
+                if not sid:
+                    continue
+                sid_index.setdefault(sid, []).append((pid, split, idx))
+                if sid not in sid_text and txt:
+                    sid_text[sid] = txt
+        return sid_index, sid_text
+
+    hf_index, hf_texts = _build_index(hf_dataset)
+
+    available_sids = sorted(hf_index.keys())
+    if not available_sids:
+        st.error("No samples found in the HuggingFace dataset.")
+        return
+
+    sentences_df = pd.DataFrame(
+        {
+            "sentence_id":      available_sids,
+            "sentence_content": [hf_texts.get(s, "(unavailable)") for s in available_sids],
+        }
+    )
+    st.sidebar.info(f"Sentences available: {len(sentences_df)}")
+
+    def _eeg_loader(sentence_id, _unused=None):
+        sid = sentence_id.upper()
+        candidates = hf_index.get(sid, [])
+        if not candidates:
+            st.warning(f"No HF samples found for {sid}.")
+            dummy = np.zeros(128, dtype=np.float32)
+            return {ch: dummy for ch in ["RAW_TP9", "RAW_AF7", "RAW_AF8", "RAW_TP10"]}
+
+        pid_options = sorted({c[0] for c in candidates})
+        selected_pid = st.sidebar.selectbox(
+            "Participant",
+            options=pid_options,
+            key=f"participant_select_{sid}",
+        )
+
+        pid, split, idx = next(
+            ((p, s, i) for p, s, i in candidates if p == selected_pid),
+            candidates[0],
+        )
+        sample = hf_dataset[split][idx]
+
+        dummy = np.zeros(128, dtype=np.float32)
+        return {
+            "RAW_TP9":         dummy,
+            "RAW_AF7":         dummy,
+            "RAW_AF8":         dummy,
+            "RAW_TP10":        dummy,
+            "_sentence_id":    sid,
+            "_participant_id": pid,
+            "_hf_split":       split,
+            "_hf_idx":         idx,
+            "_hf_sample":      sample,
+        }
+
+    def _gaze_loader(_sid, _pid):
+        return None
+
+    render_eeg2text_page(
+        sentences_df=sentences_df,
+        eeg_data_loader=_eeg_loader,
+        gaze_data_loader=_gaze_loader,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Main app function
+# ---------------------------------------------------------------------------
+
 def main():
-    st.title("EEG Data Browser")
+    # Track which page to show
+    if "show_eeg2text" not in st.session_state:
+        st.session_state.show_eeg2text = False
+
+    # ── EEG-to-Text page ──────────────────────────────────────────────────────
+    if st.session_state.show_eeg2text:
+        st.sidebar.header("Controls")
+        if st.sidebar.button("Back to Data Browser"):
+            st.session_state.show_eeg2text = False
+            st.rerun()
+        render_eeg2text()
+        return
+
+    # ── Original Data Browser (karelvlk style) ────────────────────────────────
+    title_col, btn_col = st.columns([3, 1])
+    with title_col:
+        st.title("EEG Data Browser")
+    with btn_col:
+        st.write("")  # vertical alignment nudge
+        st.write("")
+        if st.button("🧠 EEG-to-Text", type="secondary", use_container_width=True):
+            st.session_state.show_eeg2text = True
+            st.rerun()
 
     # Sidebar for controls
     st.sidebar.header("Controls")
