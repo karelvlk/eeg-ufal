@@ -13,6 +13,44 @@ from plotly.subplots import make_subplots
 from src.data_preprocessing import preprocess_raw_data
 
 
+def create_gaze_kde_heatmap(frame, screen_size=(1920, 1080), image_rectangle=None):
+    """Legacy sample-based KDE, independently usable when EEG is unavailable."""
+    from scipy.stats import gaussian_kde
+    data = frame.copy()
+    for column in ("X", "Y"):
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    data = data[np.isfinite(data.X) & np.isfinite(data.Y)]
+    events = data.Event.fillna("").str.lower() if "Event" in data else pd.Series("", index=data.index)
+    groups = [("Saccade KDE", data[events.eq("saccade")], "Reds"),
+              ("Fixation KDE", data[events.eq("fixation")], "Blues"),
+              ("Combined KDE", data, "Viridis")]
+    figure = make_subplots(rows=1, cols=3, subplot_titles=[group[0] for group in groups])
+    width, height = screen_size
+    x, y = np.linspace(0, width, 100), np.linspace(0, height, 100)
+    xx, yy = np.meshgrid(x, y)
+    positions = np.vstack([xx.ravel(), yy.ravel()])
+    for column, (name, samples, colorscale) in enumerate(groups, 1):
+        if len(samples) >= 3:
+            values = samples[["X", "Y"]].to_numpy().T
+            if np.linalg.matrix_rank(np.cov(values)) == 2:
+                try:
+                    density = gaussian_kde(values)(positions).reshape(xx.shape)
+                    figure.add_trace(go.Heatmap(x=x, y=y, z=density, colorscale=colorscale,
+                                               showscale=False, name=name), row=1, col=column)
+                except np.linalg.LinAlgError:
+                    pass
+        figure.update_xaxes(title_text="Screen X (px)", range=[0, width], row=1, col=column)
+        figure.update_yaxes(title_text="Screen Y (px)", range=[height, 0], row=1, col=column)
+    figure.update_layout(title="Screen-coordinate sample KDE (not an image overlay)", height=400,
+                         showlegend=False, margin=dict(t=70, b=20))
+    if image_rectangle is not None:
+        left, top, image_width, image_height = image_rectangle
+        figure.add_shape(type="rect", x0=left, y0=top, x1=left + image_width,
+                         y1=top + image_height, line=dict(color="#ffb000", width=2, dash="dash"),
+                         row=1, col=2)
+    return figure
+
+
 def plot_gaze_heatmap(df: pd.DataFrame) -> plt.Figure:
     # Ensure X and Y are numeric
     df["X"] = pd.to_numeric(df["X"], errors="coerce")

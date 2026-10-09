@@ -4,16 +4,45 @@ import src.processor as processor
 import pandas as pd
 from src.file_loader import GithubFileLoader, FileLoader
 import plotly.graph_objects as go
+from pathlib import Path
+from src.dataset_cache import resolve_ui
+
+# Prepared metadata lists the whole corpus; large files are cached on selection.
+prepared = Path(__file__).resolve().parent / ".cache/full_dataset"
+if (prepared / "manifest.csv").is_file() and (prepared / "data/repository_tree.json").is_file():
+    os.environ.setdefault("FILE_LOADER_TYPE", "local")
+    os.environ.setdefault("DATA_PATH", str(prepared / "data"))
+    os.environ.setdefault("PROCESS_MANIFEST", str(prepared / "manifest.csv"))
+    os.environ.setdefault("PROCESS_COMPARISON_MANIFEST", str(prepared / "manifest.csv"))
+    if Path(os.environ["DATA_PATH"]).resolve() == (prepared / "data").resolve():
+        os.environ.setdefault("EMMT_LAZY_DOWNLOAD", "1")
 
 # Set page configuration
 st.set_page_config(page_title="EEG Data Browser", layout="wide")
+
+st.session_state.pop("contribution_next_view", None)
+if st.session_state.get("main_view") not in (None, "Signals", "Translation process"):
+    st.session_state.pop("main_view")
+view = st.sidebar.radio("View", ["Signals", "Translation process"],
+                        index=int(bool(os.getenv("PROCESS_MANIFEST"))), key="main_view")
+from src.inspection_selection import select_inspection_trial, signal_unit_for_trial
+shared_selection = None
+if os.getenv("FILE_LOADER_TYPE", "github") == "local":
+    shared_selection = select_inspection_trial(os.getenv("PROCESS_MANIFEST", ""), Path(os.getenv("DATA_PATH", "ufal_emmt")))
+if view == "Translation process":
+    from src.translation_process import render
+    render(shared_selection)
+    st.stop()
 
 
 # Singleton implementation for loader
 @st.cache_resource
 def get_loader():
-    file_loader_type = os.getenv("FILE_LOADER_TYPE")
-    data_path = os.getenv("DATA_PATH")
+    file_loader_type = os.getenv("FILE_LOADER_TYPE", "github")
+    data_path = os.getenv("DATA_PATH") or (
+        str(Path(__file__).resolve().parent / "ufal_emmt") if file_loader_type == "local"
+        else "https://api.github.com/repos/ufal/eyetracked-multi-modal-translation"
+    )
     print(f"file_loader_type: {file_loader_type}")
     print(f"data_path: {data_path}")
     if file_loader_type == "local":
@@ -25,7 +54,21 @@ def get_loader():
 
 
 # Get the singleton instance
-loader = get_loader()
+try:
+    loader = get_loader()
+except (RuntimeError, ValueError, OSError) as exc:
+    st.error(str(exc))
+    st.info("You can still open Translation process from the sidebar. For offline Signals, set FILE_LOADER_TYPE=local and DATA_PATH to your populated dataset folder.")
+    if st.button("Retry loading dataset"):
+        get_loader.clear()
+        st.rerun()
+    st.stop()
+if getattr(loader, "index_warning", None):
+    st.warning(loader.index_warning)
+if st.sidebar.button("Refresh dataset index"):
+    get_loader.clear()
+    st.cache_data.clear()
+    st.rerun()
 
 
 @st.cache_data
@@ -109,7 +152,7 @@ def main():
     st.sidebar.header("Controls")
 
     # Category selection
-    selected_category = st.sidebar.selectbox("Select Category", loader.get_categories())
+    selected_category = shared_selection[1] if shared_selection is not None else st.sidebar.selectbox("Select Category", loader.get_categories())
 
     # Initialize filter in session state if not present
     if "participant_filter" not in st.session_state:
@@ -135,14 +178,14 @@ def main():
     sentence_ids = get_sentence_ids(selected_category, st.session_state.participant_filter)
 
     # Participant and Sentence filters with callbacks
-    selected_participant = st.sidebar.selectbox(
+    selected_participant = shared_selection[0].participant if shared_selection is not None else st.sidebar.selectbox(
         "Filter by Participant",
         participant_ids,
         key="participant_filter",
         on_change=on_participant_change,
     )
 
-    selected_sentence = st.sidebar.selectbox(
+    selected_sentence = shared_selection[0].sentence if shared_selection is not None else st.sidebar.selectbox(
         "Filter by Sentence",
         sentence_ids,
         key="sentence_filter",
@@ -160,13 +203,34 @@ def main():
 
     # NOW we can get all files for the selected category with filters
     all_files = get_filtered_files(selected_category, selected_participant, selected_sentence)
+    if shared_selection is not None:
+        unit = signal_unit_for_trial(loader, *shared_selection)
+        all_files = [unit] if unit is not None else []
+        row, phase = shared_selection
+        st.caption(f"Shared trial: {row.participant}_{row.sentence} · {row.condition} · {phase} · order {row.get('order', '')}")
+        st.write("English source:", row.source)
+        image_path = str(row.get("image_path", ""))
+        image_file = resolve_ui(loader.base_path, image_path)
+        if image_file is not None:
+            st.image(str(image_file), width=350,
+                     caption="Same assigned image as Translation process" + (" (not shown during this phase)" if phase in ("Read", "Translate") else ""))
+        trial_audio = resolve_ui(loader.base_path, str(row.get("raw_mp3_path", "")))
+        if trial_audio is not None:
+            st.audio(str(trial_audio), format="audio/mpeg")
+            st.caption("Same whole-trial audio as Translation process; not synchronized to this phase or the signal plot.")
 
     if not all_files:
-        st.warning("No CSV files found with the selected filters.")
+        if shared_selection is not None:
+            st.warning(f"{selected_category} signals are not locally cached for this exact trial. The selected person, sentence and image have not changed.")
+            return
+        st.warning("No EEG or gaze CSV files found with the selected filters.")
+        st.info(f"Data source: {loader.base_path}. Try another phase or filter; only locally cached recordings are available in local mode.")
         return
 
     # Reset current file index if filters change
     filter_key = f"{selected_category}_{selected_participant}_{selected_sentence}"
+    if shared_selection is not None:
+        filter_key += "_" + shared_selection[0].identity
     if "filter_key" not in st.session_state or st.session_state.filter_key != filter_key:
         st.session_state.current_file_idx = 0
         st.session_state.filter_key = filter_key
@@ -187,7 +251,7 @@ def main():
             range(len(file_names)),
             format_func=lambda i: file_names[i],
             index=st.session_state.current_file_idx,
-            key="file_selector_main",
+            key=f"file_selector_{filter_key}_{st.session_state.current_file_idx}",
             label_visibility="collapsed",
         )
         if selected_file_idx_main != st.session_state.current_file_idx:
@@ -197,13 +261,13 @@ def main():
     # Now the buttons will be positioned after the selectbox is rendered
     with main_nav_col1:
         # Create a container at the vertical middle
-        if st.button("← Previous", key="prev_main", use_container_width=True):
+        if st.button("← Previous", key="prev_main", use_container_width=True, disabled=shared_selection is not None):
             st.session_state.current_file_idx = (st.session_state.current_file_idx - 1) % len(all_files)
             st.rerun()
 
     with main_nav_col3:
         # Create a container at the vertical middle
-        if st.button("Next →", key="next_main", use_container_width=True):
+        if st.button("Next →", key="next_main", use_container_width=True, disabled=shared_selection is not None):
             st.session_state.current_file_idx = (st.session_state.current_file_idx + 1) % len(all_files)
             st.rerun()
 
@@ -212,7 +276,36 @@ def main():
     eeg_df, gaze_df, audio_io = load_file_data(current_data_unit)
 
     if eeg_df is None:
-        st.warning("No EEG data found")
+        st.caption(f"{current_data_unit['participant_id']} · {current_data_unit['sentence_id']} · {current_data_unit['category']}")
+        published_eeg = current_data_unit.get("eeg_source_path", current_data_unit.get("eeg"))
+        message = ("EEG could not be loaded for this exact trial/phase; check the file/download warning above. "
+                   if published_eeg else "No preprocessed EEG is published for this exact trial/phase. ")
+        st.info(message + "Gaze can be inspected independently.")
+        if gaze_df is not None:
+            extent = st.sidebar.selectbox("Screen coordinate range", ["1920 × 1080 (published code)", "1280 × 1024 (legacy Signals)"])
+            size = (1920, 1080) if extent.startswith("1920") else (1280, 1024)
+            rectangle = None
+            manifest_path = os.getenv("PROCESS_MANIFEST", "")
+            if current_data_unit["category"] in ("See", "Update") and Path(manifest_path).is_file():
+                from PIL import Image
+                manifest = pd.read_csv(manifest_path, keep_default_na=False)
+                gaze_column = f"gaze_{current_data_unit['category']}_path"
+                if gaze_column in manifest and "image_path" in manifest:
+                    matching = manifest[manifest[gaze_column].map(lambda path: Path(path).stem == current_data_unit["name"])]
+                    if len(matching) == 1:
+                        image_path = Path(loader.base_path) / matching.iloc[0].image_path
+                        if image_path.is_file():
+                            with Image.open(image_path) as image:
+                                rectangle = (650 - image.width / 2, 820 - image.height / 2, image.width, image.height)
+            st.plotly_chart(processor.create_gaze_kde_heatmap(gaze_df, size, rectangle), use_container_width=True)
+            if rectangle is not None:
+                st.caption("Dashed rectangle in the fixation panel: assumed image bounds from published code, NOT verified against the recording. Gaze outside this rectangle does not appear in the image heatmap.")
+            st.caption("This reference uses raw coordinate samples and adaptive KDE smoothing, unlike the duration-weighted image heatmap. Screen range is a display setting, not verified recording geometry. Empty panels indicate insufficient non-degenerate samples.")
+        else:
+            st.warning("Gaze is not locally available for this trial.")
+        if audio_io is not None:
+            st.audio(audio_io)
+        st.sidebar.info(f"{len(all_files)} recordings match your filters")
         return
 
     # File information badges
@@ -222,6 +315,7 @@ def main():
     st.markdown(
         f":violet-badge[Category: {badge_category}] :orange-badge[Participant: {badge_participant_id}] :blue-badge[Sentence: {badge_sentence_id}]"
     )
+    st.caption("Signal panels currently use independent recording-relative time axes. Shared hover does not establish EEG/gaze/audio synchronization.")
 
     # Column selection for plotting
     st.sidebar.subheader("Plot Settings")

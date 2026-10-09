@@ -2,6 +2,8 @@ import os
 import re
 import io
 import logging
+import json
+from pathlib import Path
 import requests
 import pandas as pd
 import streamlit as st
@@ -93,6 +95,9 @@ class FileLoader:
         print("Indexing complete:", cat_counter)
 
     def get_repo_structure(self) -> list[dict]:
+        from src.dataset_cache import enabled, index
+        if enabled():
+            return list(index(str(self.base_path))[1].values())
         tree = []
         for base, dirs, files in os.walk(self.base_path):
             rel_base = os.path.relpath(base, self.base_path)
@@ -158,7 +163,13 @@ class FileLoader:
         )
 
         for category in categories_to_search:
-            for basename, eeg_info in self.eeg_files[category].items():
+            # Gaze-only trials are real recordings too; do not require EEG to browse them.
+            basenames = sorted(set(self.eeg_files[category]) | set(self.gaze_files[category]))
+            for basename in basenames:
+                eeg_info = self.eeg_files[category].get(basename, {
+                    "participant_id": self.extract_participant_id(basename),
+                    "sentence_id": self.extract_sentence_id(basename),
+                })
                 # Apply filters
                 if participant_id_filter and eeg_info["participant_id"] != participant_id_filter:
                     continue
@@ -176,7 +187,7 @@ class FileLoader:
                     "category": category,
                     "eeg": os.path.join(
                         self.base_path, "contents" if self.loader_type == LoaderType.GITHUB else "", eeg_info["path"]
-                    ),
+                    ) if eeg_info.get("path") else None,
                     "gaze": os.path.join(
                         self.base_path, "contents" if self.loader_type == LoaderType.GITHUB else "", gaze_path
                     )
@@ -194,14 +205,36 @@ class FileLoader:
         return data_units
 
     def load_data(self, data_unit: dict) -> tuple[pd.DataFrame | None, pd.DataFrame | None, io.BytesIO | None]:
+        from src.dataset_cache import enabled, resolve_ui
+        if enabled():
+            data_unit = dict(data_unit)
+            for kind in ("eeg", "gaze", "audio"):
+                if data_unit.get(kind):
+                    relative = str(Path(data_unit[kind]).relative_to(Path(self.base_path)))
+                    resolved = resolve_ui(self.base_path, relative)
+                    data_unit[kind] = str(resolved) if resolved else None
         eeg = None
         gaze = None
         audio_bytes = None
 
-        if data_unit["eeg"]:
-            eeg = pd.read_csv(data_unit["eeg"])
-        if data_unit["gaze"]:
-            gaze = pd.read_csv(data_unit["gaze"])
+        def read_signal(path, kind):
+            if not path:
+                return None
+            try:
+                frame = pd.read_csv(path)
+            except (pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+                st.warning(f"{kind} CSV could not be parsed: {Path(path).name}. {exc}")
+                return None
+            if frame.empty:
+                st.warning(
+                    f"The published {kind} CSV contains headers but no samples: {Path(path).name}. "
+                    "This is missing recording data, not absence of activity."
+                )
+                return None
+            return frame
+
+        eeg = read_signal(data_unit["eeg"], "EEG")
+        gaze = read_signal(data_unit["gaze"], "gaze")
         if data_unit["audio"]:
             with open(data_unit["audio"], "rb") as f:
                 audio_bytes = io.BytesIO(f.read())
@@ -214,8 +247,8 @@ class FileLoader:
         category_filter: Literal["Read", "See", "Update", "Translate", "All"] = "All",
         sentence_id_filter: str | None = None,
     ) -> list[str]:
-        data_units = self.get_data_files(category_filter, sentence_id_filter)
-        return list(set([data_unit["participant_id"] for data_unit in data_units]))
+        data_units = self.get_data_files(category_filter, sentence_id_filter=sentence_id_filter)
+        return sorted({du["participant_id"] for du in data_units if du["participant_id"]})
 
     def get_valid_sentence_ids(
         self,
@@ -223,7 +256,7 @@ class FileLoader:
         participant_id_filter: str | None = None,
     ) -> list[str]:
         data_units = self.get_data_files(category_filter, participant_id_filter)
-        return list(set([data_unit["sentence_id"] for data_unit in data_units]))
+        return sorted({du["sentence_id"] for du in data_units if du["sentence_id"]})
 
 
 class GithubFileLoader(FileLoader):
@@ -240,33 +273,54 @@ class GithubFileLoader(FileLoader):
             self.raw_base_url = base_url
 
         self.api_base_url = base_url
+        self.index_warning = None
+        cache_root = Path(os.getenv("GITHUB_INDEX_CACHE_DIR", str(Path(__file__).resolve().parents[1] / ".cache")))
+        repository_key = re.sub(r"[^a-zA-Z0-9_-]", "_", base_url.split("repos/")[-1].strip("/"))
+        self.index_cache_path = cache_root / f"github-index-{repository_key}.json"
         super().__init__(base_path=base_url)
 
-    @st.cache_data
-    def get_repo_structure(_self):
-        """Get the repository structure from GitHub API."""
-        url = f"{_self.api_base_url}/git/trees/main?recursive=1"
-        print("calling api:", url)
-        response = requests.get(url)
-        if response.status_code != 200:
-            if LOCAL_DEBUG:
-                logging.error(f"Failed to fetch repository structure: {response.status_code}")
-            else:
-                st.error(f"Failed to fetch repository structure: {response.status_code}")
-            return []
+    def get_repo_structure(self):
+        """Retry transient failures; use only a complete, same-repository cached index."""
+        url = f"{self.api_base_url}/git/trees/main?recursive=1"
+        error = "unknown error"
+        for attempt in range(3):
+            try:
+                response = requests.get(url, timeout=15)
+                response.raise_for_status()
+                payload = response.json()
+                if not self._valid_index(payload):
+                    raise ValueError("GitHub returned an incomplete or invalid dataset index")
+                try:
+                    self.index_cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    temporary = self.index_cache_path.with_suffix(".tmp")
+                    temporary.write_text(json.dumps(payload))
+                    temporary.replace(self.index_cache_path)
+                except OSError as exc:
+                    logging.warning("Dataset index could not be cached: %s", exc)
+                return payload["tree"]
+            except (requests.RequestException, ValueError) as exc:
+                error = str(exc)
+                logging.warning("Dataset index attempt %s failed: %s", attempt + 1, error)
+                if isinstance(exc, requests.HTTPError) and exc.response is not None:
+                    if exc.response.status_code < 500 and exc.response.status_code != 429:
+                        break
+        try:
+            payload = json.loads(self.index_cache_path.read_text())
+            if not self._valid_index(payload):
+                raise ValueError("Invalid cached index")
+            # Cached paths must fetch files from the SAME commit, not today's main.
+            self.raw_base_url = self.raw_base_url.rsplit("/", 1)[0].removesuffix("/refs/heads") + "/" + payload["sha"]
+            self.index_warning = f"GitHub index is unavailable. Using saved index at commit {payload['sha'][:12]}; file downloads still need network access."
+            return payload["tree"]
+        except (OSError, ValueError, KeyError):
+            raise RuntimeError("GitHub could not provide the dataset index and no valid saved index is available. Retry, or choose a populated local dataset folder. Details: " + error) from None
 
-        # Extract the tree from the JSON response
-        response_json = response.json()
-        if "tree" in response_json:
-            return response_json["tree"]
-        else:
-            if LOCAL_DEBUG:
-                logging.error("Invalid GitHub API response structure")
-            else:
-                st.error("Invalid GitHub API response structure")
-            return []
+    def _valid_index(self, payload):
+        return (isinstance(payload, dict) and isinstance(payload.get("tree"), list)
+                and bool(payload["tree"]) and not payload.get("truncated", False)
+                and bool(re.fullmatch(r"[0-9a-f]{40}", str(payload.get("sha", ""))))
+                and str(payload.get("url", "")).startswith(self.api_base_url.rstrip("/") + "/git/trees/"))
 
-    @st.cache_data
     def get_data_files(
         _self,
         category_filter: Literal["Read", "See", "Update", "Translate", "All"] = "All",
@@ -293,7 +347,11 @@ class GithubFileLoader(FileLoader):
         )
 
         for category in categories_to_search:
-            for basename, eeg_info in _self.eeg_files[category].items():
+            for basename in sorted(set(_self.eeg_files[category]) | set(_self.gaze_files[category])):
+                eeg_info = _self.eeg_files[category].get(basename, {
+                    "participant_id": _self.extract_participant_id(basename),
+                    "sentence_id": _self.extract_sentence_id(basename),
+                })
                 # Apply filters
                 if participant_id_filter and eeg_info["participant_id"] != participant_id_filter:
                     continue
@@ -309,7 +367,7 @@ class GithubFileLoader(FileLoader):
                     "participant_id": eeg_info["participant_id"],
                     "sentence_id": eeg_info["sentence_id"],
                     "category": category,
-                    "eeg": f"{_self.raw_base_url}/{eeg_info['path']}",
+                    "eeg": f"{_self.raw_base_url}/{eeg_info['path']}" if eeg_info.get("path") else None,
                     "gaze": f"{_self.raw_base_url}/{gaze_path}" if gaze_path else None,
                     "audio": f"{_self.raw_base_url}/{audio_path}" if audio_path else None,
                 }
@@ -355,7 +413,7 @@ class GithubFileLoader(FileLoader):
 
         if data_unit["audio"]:
             try:
-                response = requests.get(data_unit["audio"])
+                response = requests.get(data_unit["audio"], timeout=30)
                 if response.status_code == 200:
                     audio = io.BytesIO(response.content)
             except Exception as e:
